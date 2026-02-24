@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}BigBrother — Stats{% endblock %}
+
+{% block content %}
+<div class="stats-page">
+    <h1 class="page-title">&#128200; Kill Stats</h1>
+
+    <!-- Summary cards -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-value" id="total-kills">0</div>
+            <div class="stat-label">Total Kills</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="weekly-kills">0</div>
+            <div class="stat-label">This Week</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="daily-avg">0</div>
+            <div class="stat-label">Daily Average</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="longest-streak">0:00</div>
+            <div class="stat-label">Longest Streak</div>
+        </div>
+    </div>
+
+    <!-- Weekly chart -->
+    <div class="section">
+        <h2 class="section-title">Weekly Kill Count</h2>
+        <div class="chart-container">
+            <canvas id="weekly-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Worst hours chart -->
+    <div class="section">
+        <h2 class="section-title">Worst Hours</h2>
+        <div class="chart-container">
+            <canvas id="hours-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Greatest hits -->
+    <div class="section">
+        <h2 class="section-title">&#128165; Greatest Hits (AI Coach)</h2>
+        <div id="roast-history" class="roast-history">
+            <p class="muted">No roasts yet. Stay off your phone.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let weeklyChart = null;
+let hoursChart = null;
+
+function formatStreak(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm ' + s + 's';
+}
+
+function loadStats() {
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-kills').textContent = data.total_kills || 0;
+            document.getElementById('weekly-kills').textContent = data.weekly?.total_kills || 0;
+            document.getElementById('daily-avg').textContent = data.weekly?.daily_average?.toFixed(1) || '0';
+            document.getElementById('longest-streak').textContent = formatStreak(data.longest_streak_seconds || 0);
+
+            // Weekly chart
+            if (data.weekly?.days) {
+                const labels = Object.keys(data.weekly.days).reverse();
+                const values = labels.map(d => data.weekly.days[d].kill_count);
+                const shortLabels = labels.map(d => {
+                    const dt = new Date(d);
+                    return dt.toLocaleDateString('en', {weekday: 'short'});
+                });
+
+                if (weeklyChart) weeklyChart.destroy();
+                weeklyChart = new Chart(document.getElementById('weekly-chart'), {
+                    type: 'bar',
+                    data: {
+                        labels: shortLabels,
+                        datasets: [{
+                            label: 'Kills',
+                            data: values,
+                            backgroundColor: '#ff4444',
+                            borderColor: '#cc0000',
+                            borderWidth: 1,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                            x: { ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                        },
+                    },
+                });
+            }
+
+            // Worst hours chart
+            if (data.worst_hours) {
+                const hourLabels = [];
+                const hourValues = [];
+                for (let i = 0; i < 24; i++) {
+                    hourLabels.push(i + ':00');
+                    hourValues.push(data.worst_hours[String(i)] || 0);
+                }
+
+                if (hoursChart) hoursChart.destroy();
+                hoursChart = new Chart(document.getElementById('hours-chart'), {
+                    type: 'bar',
+                    data: {
+                        labels: hourLabels,
+                        datasets: [{
+                            label: 'Kills',
+                            data: hourValues,
+                            backgroundColor: '#ff8800',
+                            borderColor: '#cc6600',
+                            borderWidth: 1,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                            x: { ticks: { color: '#aaa', maxRotation: 45 }, grid: { color: '#333' } },
+                        },
+                    },
+                });
+            }
+
+            // Roast history
+            if (data.roast_history && data.roast_history.length > 0) {
+                const container = document.getElementById('roast-history');
+                let html = '';
+                data.roast_history.slice().reverse().forEach(entry => {
+                    const ts = new Date(entry.timestamp).toLocaleString();
+                    html += `
+                        <div class="roast-entry">
+                            <div class="roast-entry-text">"${entry.roast}"</div>
+                            <div class="roast-entry-meta">${ts} &mdash; Kill #${entry.kill_count}</div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            }
+        })
+        .catch(err => console.error('Stats fetch error:', err));
+}
+
+loadStats();
+</script>
+{% endblock %}

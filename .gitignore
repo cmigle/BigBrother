@@ -1,0 +1,40 @@
+# BigBrother ignore rules
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+config/credentials.json
+config/token.json
+
+# Data (optional — uncomment to track stats in git)
+# data/stats.json
+# data/roast_history.json
+
+# Model weights (auto-downloaded)
+models/*.pt
+
+# Sound files (large binaries)
+# sounds/*.wav

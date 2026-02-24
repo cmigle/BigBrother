@@ -1,0 +1,544 @@
+/* ================================================================
+   BigBrother — Dark Theme with Military/Crosshair Aesthetic
+   ================================================================ */
+
+:root {
+    --bg-primary: #0d0d0d;
+    --bg-secondary: #1a1a1a;
+    --bg-card: #222;
+    --text-primary: #e0e0e0;
+    --text-secondary: #888;
+    --accent-red: #ff4444;
+    --accent-red-dark: #cc0000;
+    --accent-green: #44ff44;
+    --accent-orange: #ff8800;
+    --accent-yellow: #ffcc00;
+    --border: #333;
+    --radius: 8px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', 'Consolas', monospace;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+/* ================================================================
+   Navigation
+   ================================================================ */
+
+.navbar {
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--accent-red);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.nav-icon {
+    width: 30px;
+    height: 30px;
+}
+
+.nav-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent-red);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+.nav-links {
+    display: flex;
+    gap: 0;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    padding: 18px 20px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+}
+
+.nav-link:hover {
+    color: var(--text-primary);
+    background: rgba(255, 68, 68, 0.1);
+}
+
+.nav-link.active {
+    color: var(--accent-red);
+    border-bottom-color: var(--accent-red);
+}
+
+/* ================================================================
+   Container / Layout
+   ================================================================ */
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+}
+
+.page-title {
+    font-size: 1.8rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-primary);
+}
+
+.section {
+    margin-top: 2rem;
+}
+
+.section-title {
+    font-size: 1.2rem;
+    color: var(--accent-red);
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.muted {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+/* ================================================================
+   Status Banner
+   ================================================================ */
+
+.status-banner {
+    padding: 2rem;
+    border-radius: var(--radius);
+    text-align: center;
+    margin-bottom: 1.5rem;
+    transition: all 0.3s;
+    border: 2px solid var(--border);
+}
+
+.status-clear {
+    background: linear-gradient(135deg, #0a2e0a, #1a1a1a);
+    border-color: var(--accent-green);
+}
+
+.status-danger {
+    background: linear-gradient(135deg, #2e0a0a, #1a1a1a);
+    border-color: var(--accent-red);
+    animation: pulse-danger 1s ease-in-out infinite;
+}
+
+@keyframes pulse-danger {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 68, 68, 0.3); }
+    50% { box-shadow: 0 0 40px rgba(255, 68, 68, 0.6); }
+}
+
+.status-icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+}
+
+.status-text {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.status-confidence {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+/* ================================================================
+   Roast Card
+   ================================================================ */
+
+.roast-card {
+    background: var(--bg-card);
+    border: 2px solid var(--accent-orange);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.roast-label {
+    font-size: 0.85rem;
+    color: var(--accent-orange);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 0.5rem;
+}
+
+.roast-text {
+    font-size: 1.1rem;
+    font-style: italic;
+    color: var(--text-primary);
+    line-height: 1.7;
+}
+
+/* ================================================================
+   Stat Cards
+   ================================================================ */
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent-red);
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 0.3rem;
+}
+
+/* ================================================================
+   Calendar
+   ================================================================ */
+
+.calendar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.calendar-event {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.8rem 1rem;
+}
+
+.event-check {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    cursor: pointer;
+}
+
+.event-check input[type="checkbox"] {
+    accent-color: var(--accent-green);
+    width: 18px;
+    height: 18px;
+}
+
+.event-summary {
+    font-size: 0.95rem;
+}
+
+.event-time {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ================================================================
+   Charts
+   ================================================================ */
+
+.chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    max-height: 350px;
+}
+
+/* ================================================================
+   Roast History
+   ================================================================ */
+
+.roast-history {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.roast-entry {
+    background: var(--bg-card);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 0.8rem 1rem;
+}
+
+.roast-entry-text {
+    font-style: italic;
+    margin-bottom: 0.3rem;
+    font-size: 0.95rem;
+}
+
+.roast-entry-meta {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ================================================================
+   Settings
+   ================================================================ */
+
+.settings-form {
+    max-width: 700px;
+}
+
+.settings-section {
+    margin-bottom: 2rem;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--border);
+    gap: 1rem;
+}
+
+.setting-row label:first-child {
+    min-width: 180px;
+    font-size: 0.9rem;
+}
+
+.setting-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent-red);
+}
+
+.setting-row input[type="number"],
+.setting-row input[type="text"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    border-radius: 4px;
+    width: 160px;
+    font-size: 0.9rem;
+}
+
+.setting-value {
+    min-width: 50px;
+    text-align: right;
+    font-family: monospace;
+    color: var(--accent-red);
+}
+
+/* Toggle switch */
+.toggle {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    display: inline-block;
+}
+
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--border);
+    border-radius: 24px;
+    transition: 0.3s;
+}
+
+.toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px; width: 18px;
+    left: 3px; bottom: 3px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: 0.3s;
+}
+
+.toggle input:checked + .toggle-slider {
+    background: var(--accent-green);
+}
+
+.toggle input:checked + .toggle-slider::before {
+    transform: translateX(24px);
+}
+
+.btn-save {
+    background: var(--accent-red);
+    color: white;
+    border: none;
+    padding: 12px 32px;
+    font-size: 1rem;
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 1rem;
+    transition: background 0.2s;
+}
+
+.btn-save:hover {
+    background: var(--accent-red-dark);
+}
+
+.save-feedback {
+    margin-top: 0.8rem;
+    color: var(--accent-green);
+    font-size: 0.9rem;
+}
+
+/* ================================================================
+   Camera
+   ================================================================ */
+
+.camera-container {
+    position: relative;
+    max-width: 800px;
+    margin: 0 auto 1.5rem;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #000;
+}
+
+.camera-feed {
+    width: 100%;
+    display: block;
+}
+
+.camera-overlay {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-green);
+}
+
+.camera-overlay.danger {
+    border-color: var(--accent-red);
+    animation: pulse-danger 1s infinite;
+}
+
+.camera-label {
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-green);
+}
+
+.camera-overlay.danger .camera-label {
+    color: var(--accent-red);
+}
+
+.camera-info {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    max-width: 800px;
+    margin: 0 auto 1.5rem;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 0;
+}
+
+.info-label {
+    color: var(--text-secondary);
+}
+
+.info-value {
+    font-family: monospace;
+}
+
+/* ================================================================
+   Footer
+   ================================================================ */
+
+.footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+    margin-top: 3rem;
+}
+
+/* ================================================================
+   Responsive
+   ================================================================ */
+
+@media (max-width: 768px) {
+    .navbar {
+        flex-direction: column;
+        height: auto;
+        padding: 0.5rem 1rem;
+    }
+
+    .nav-links {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .nav-link {
+        padding: 10px 12px;
+        font-size: 0.8rem;
+    }
+
+    .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .setting-row {
+        flex-wrap: wrap;
+    }
+}

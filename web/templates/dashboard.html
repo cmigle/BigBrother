@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}BigBrother — Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Status banner -->
+    <div id="status-banner" class="status-banner status-clear">
+        <div class="status-icon" id="status-icon">&#9678;</div>
+        <div class="status-text" id="status-text">ALL CLEAR</div>
+        <div class="status-confidence" id="status-confidence"></div>
+    </div>
+
+    <!-- AI Coach roast -->
+    <div class="roast-card" id="roast-card" style="display: none;">
+        <div class="roast-label">&#128165; DRILL SERGEANT SAYS:</div>
+        <div class="roast-text" id="roast-text"></div>
+    </div>
+
+    <!-- Kill count -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-value" id="kill-count">0</div>
+            <div class="stat-label">Kills Today</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="streak-time">0:00</div>
+            <div class="stat-label">Current Streak</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="cooldown-status">Ready</div>
+            <div class="stat-label">Status</div>
+        </div>
+    </div>
+
+    <!-- Calendar events -->
+    <div class="section">
+        <h2 class="section-title">&#128197; Today's Calendar</h2>
+        <div id="calendar-events" class="calendar-list">
+            <p class="muted">Loading calendar...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function formatStreak(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    return m + ':' + String(s).padStart(2, '0');
+}
+
+function updateDashboard() {
+    fetch('/api/status')
+        .then(r => r.json())
+        .then(data => {
+            const banner = document.getElementById('status-banner');
+            const text = document.getElementById('status-text');
+            const conf = document.getElementById('status-confidence');
+            const icon = document.getElementById('status-icon');
+
+            if (data.phone_detected) {
+                banner.className = 'status-banner status-danger';
+                text.textContent = 'PHONE DETECTED — FIRING!';
+                conf.textContent = 'Confidence: ' + (data.confidence * 100).toFixed(1) + '%';
+                icon.innerHTML = '&#128683;';
+            } else {
+                banner.className = 'status-banner status-clear';
+                text.textContent = 'ALL CLEAR';
+                conf.textContent = '';
+                icon.innerHTML = '&#9678;';
+            }
+
+            document.getElementById('kill-count').textContent = data.kill_count_today;
+            document.getElementById('streak-time').textContent = formatStreak(data.current_streak);
+            document.getElementById('cooldown-status').textContent = data.on_cooldown ? 'Cooldown' : 'Armed';
+
+            const roastCard = document.getElementById('roast-card');
+            const roastText = document.getElementById('roast-text');
+            if (data.latest_roast) {
+                roastCard.style.display = 'block';
+                roastText.textContent = data.latest_roast;
+            }
+        })
+        .catch(err => console.error('Status fetch error:', err));
+}
+
+function updateCalendar() {
+    fetch('/api/calendar')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('calendar-events');
+            if (!data.authenticated) {
+                container.innerHTML = '<p class="muted">Google Calendar not connected. Add credentials.json to config/ and restart.</p>';
+                return;
+            }
+            if (data.events.length === 0) {
+                container.innerHTML = '<p class="muted">No events today. Lucky you.</p>';
+                return;
+            }
+
+            let html = '';
+            data.events.forEach(ev => {
+                const start = ev.start ? new Date(ev.start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                const end = ev.end ? new Date(ev.end).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+                html += `
+                    <div class="calendar-event">
+                        <label class="event-check">
+                            <input type="checkbox" onchange="completeTask('${ev.id}', this)" ${ev.summary.startsWith('✅') ? 'checked disabled' : ''}>
+                            <span class="event-summary">${ev.summary}</span>
+                        </label>
+                        <span class="event-time">${start} - ${end}</span>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        })
+        .catch(err => console.error('Calendar fetch error:', err));
+}
+
+function completeTask(eventId, checkbox) {
+    fetch('/api/calendar/complete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            checkbox.checked = false;
+            alert('Failed to complete task');
+        } else {
+            setTimeout(updateCalendar, 1000);
+        }
+    });
+}
+
+// Poll every 2 seconds
+setInterval(updateDashboard, 2000);
+updateDashboard();
+updateCalendar();
+setInterval(updateCalendar, 60000);
+</script>
+{% endblock %}
