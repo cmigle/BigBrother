@@ -34,6 +34,9 @@ class PhoneDetectionResult:
     bbox: Optional[Tuple[int, int, int, int]] = None  # (x1, y1, x2, y2)
     annotated_frame: Optional[np.ndarray] = None
     detection_duration: float = 0.0
+    # Active-use fields: phone detected + user NOT looking at camera/screen
+    face_visible: bool = True   # True = user is facing the camera
+    actively_on_phone: bool = False  # True = phone visible AND face NOT visible
 
 
 class PhoneDetector:
@@ -85,8 +88,26 @@ class PhoneDetector:
         self.screen_overlap_threshold = screen_overlap_threshold
         self.max_phone_area_fraction = max_phone_area_fraction
 
+        # Face detector — used to decide whether the user is actively looking
+        # at the phone or whether it is just passively resting on the desk.
+        # When the user looks DOWN at their phone their face is no longer
+        # visible to the webcam, so face_visible=False + phone detected → active use.
+        self._face_cascade: Optional[cv2.CascadeClassifier] = None
+        try:
+            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            cascade = cv2.CascadeClassifier(cascade_path)
+            if not cascade.empty():
+                self._face_cascade = cascade
+                logger.info("Face detector (Haar cascade) loaded")
+            else:
+                logger.warning("Haar cascade empty — face-visibility check disabled")
+        except Exception as exc:
+            logger.warning("Could not load face cascade: %s — face-visibility check disabled", exc)
+
         self._detection_start: Optional[float] = None
-        self._phone_detected: bool = False
+        self._phone_detected: bool = False   # raw phone visible
+        self._active_start: Optional[float] = None
+        self._actively_on_phone: bool = False  # phone visible + face NOT visible
         self._latest_result: Optional[PhoneDetectionResult] = None
         self._latest_frame: Optional[np.ndarray] = None
         self._cap: Optional[cv2.VideoCapture] = None
@@ -316,6 +337,31 @@ class PhoneDetector:
         now = time.time()
         detected = best_conf > 0
 
+        # --- Face visibility -------------------------------------------
+        face_visible = True  # assume visible when face detector unavailable
+        if self._face_cascade is not None:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self._face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=4,
+                minSize=(60, 60),
+                flags=cv2.CASCADE_SCALE_IMAGE,
+            )
+            face_visible = len(faces) > 0
+            # Draw face boxes for debug visibility
+            for (fx, fy, fw, fh) in faces:
+                cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), (0, 200, 0), 2)
+                cv2.putText(annotated, "Face", (fx, fy - 8),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
+        else:
+            # No cascade — fall back to original behaviour (all phone detections count)
+            face_visible = False  # treat as "not visible" so existing logic fires
+
+        # Actively on phone = phone present AND user is NOT looking at the screen
+        active = detected and not face_visible
+
+        # --- Raw phone state ---
         if detected:
             if not self._phone_detected:
                 self._detection_start = now
@@ -324,15 +370,29 @@ class PhoneDetector:
             self._phone_detected = False
             self._detection_start = None
 
+        # --- Active-use state (what triggers the scare) ---
+        if active:
+            if not self._actively_on_phone:
+                self._active_start = now
+            self._actively_on_phone = True
+        else:
+            self._actively_on_phone = False
+            self._active_start = None
+
         duration = 0.0
-        if self._phone_detected and self._detection_start is not None:
-            duration = now - self._detection_start
+        if self._actively_on_phone and self._active_start is not None:
+            duration = now - self._active_start
+        elif self._phone_detected and self._detection_start is not None:
+            # Expose raw duration even when not "active" (for UI info)
+            pass
 
         result.detected = detected
         result.confidence = best_conf
         result.bbox = best_box
         result.annotated_frame = annotated
         result.detection_duration = duration
+        result.face_visible = face_visible
+        result.actively_on_phone = active
 
         self._latest_result = result
         self._latest_frame = annotated
@@ -341,13 +401,17 @@ class PhoneDetector:
 
     def is_phone_persistent(self, min_duration: float = 2.0) -> bool:
         """
-        Returns True if a phone has been continuously detected for at
-        least *min_duration* seconds.
+        Returns True if the user has been *actively* looking at their phone
+        (phone detected + face NOT visible to camera) for at least
+        *min_duration* seconds.
+
+        Passive phone detections (phone lying on desk while the user's face
+        is pointing at the screen) do NOT trigger this.
         """
         if self._latest_result is None:
             return False
         return (
-            self._latest_result.detected
+            self._latest_result.actively_on_phone
             and self._latest_result.detection_duration >= min_duration
         )
 

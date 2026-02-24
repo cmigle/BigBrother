@@ -14,8 +14,11 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Google API scopes — read/write for task completion
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# Google API scopes — calendar read/write + tasks read
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/tasks.readonly",
+]
 
 
 class CalendarSync:
@@ -38,7 +41,10 @@ class CalendarSync:
         self.refresh_interval = refresh_interval
 
         self._service = None
-        self._events_cache: List[Dict[str, Any]] = []
+        self._tasks_service = None
+        self._events_cache: List[Dict[str, Any]] = []      # today
+        self._tomorrow_cache: List[Dict[str, Any]] = []    # tomorrow
+        self._tasks_cache: List[Dict[str, Any]] = []       # Google Tasks
         self._last_refresh: float = 0
         self._authenticated = False
 
@@ -80,6 +86,15 @@ class CalendarSync:
             except Exception:
                 creds = None
 
+        # Force re-auth if stored token is missing required scopes (e.g. tasks.readonly added later)
+        if creds and creds.valid and creds.scopes:
+            missing = set(SCOPES) - set(creds.scopes)
+            if missing:
+                logger.info(
+                    "Stored token missing scopes %s — re-authenticating to include them", missing
+                )
+                creds = None
+
         if not creds or not creds.valid:
             if not self.credentials_path.exists():
                 logger.error(
@@ -101,6 +116,12 @@ class CalendarSync:
             f.write(creds.to_json())
 
         self._service = build("calendar", "v3", credentials=creds)
+        try:
+            self._tasks_service = build("tasks", "v1", credentials=creds)
+            logger.info("Google Tasks service ready")
+        except Exception as exc:
+            logger.warning("Could not build Tasks service: %s", exc)
+            self._tasks_service = None
         self._authenticated = True
         logger.info("Google Calendar service ready")
         return True
@@ -158,15 +179,100 @@ class CalendarSync:
             logger.error("Failed to fetch calendar events: %s", exc)
             return self._events_cache  # return stale cache on error
 
+    def fetch_tomorrow_events(self) -> List[Dict[str, Any]]:
+        """Fetch events for tomorrow directly into _tomorrow_cache."""
+        if not self._authenticated or self._service is None:
+            return []
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+        end   = start + timedelta(days=1)
+        try:
+            result = self._service.events().list(
+                calendarId=self.calendar_id,
+                timeMin=start.isoformat(),
+                timeMax=end.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+            self._tomorrow_cache = [
+                {
+                    "id": e.get("id"),
+                    "summary": e.get("summary", "Untitled"),
+                    "start": e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
+                    "end":   e.get("end",   {}).get("dateTime", e.get("end",   {}).get("date", "")),
+                    "status": e.get("status", "confirmed"),
+                    "description": e.get("description", ""),
+                    "day": "tomorrow",
+                }
+                for e in result.get("items", [])
+            ]
+            logger.info("Fetched %d tomorrow events", len(self._tomorrow_cache))
+            return self._tomorrow_cache
+        except Exception as exc:
+            logger.error("Failed to fetch tomorrow events: %s", exc)
+            return self._tomorrow_cache
+
+    def fetch_tasks(self) -> List[Dict[str, Any]]:
+        """
+        Fetch incomplete Google Tasks due today or tomorrow.
+        Returns a list of task dicts with keys: id, title, due, status.
+        """
+        if not self._authenticated or self._tasks_service is None:
+            return []
+        try:
+            now = datetime.now(timezone.utc)
+            day_after_tomorrow = (now + timedelta(days=2)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            task_lists = self._tasks_service.tasklists().list(maxResults=10).execute()
+            tasks: List[Dict[str, Any]] = []
+            for tl in task_lists.get("items", []):
+                tl_id = tl["id"]
+                result = self._tasks_service.tasks().list(
+                    tasklist=tl_id,
+                    showCompleted=False,
+                    dueMax=day_after_tomorrow.isoformat(),
+                    maxResults=20,
+                ).execute()
+                for item in result.get("items", []):
+                    if item.get("status") == "completed":
+                        continue
+                    tasks.append({
+                        "id": item.get("id"),
+                        "title": item.get("title", "Untitled task"),
+                        "due": item.get("due", ""),
+                        "notes": item.get("notes", ""),
+                        "status": item.get("status", "needsAction"),
+                        "tasklist": tl.get("title", ""),
+                    })
+            self._tasks_cache = tasks
+            logger.info("Fetched %d pending tasks", len(tasks))
+            return tasks
+        except Exception as exc:
+            logger.error("Failed to fetch tasks: %s", exc)
+            return self._tasks_cache
+
     def _maybe_refresh(self):
-        """Refresh events if the cache is stale."""
+        """Refresh events (today + tomorrow) and tasks if the cache is stale."""
         if time.time() - self._last_refresh > self.refresh_interval:
-            self.fetch_events()
+            self.fetch_events()          # populates _events_cache (today)
+            self.fetch_tomorrow_events() # populates _tomorrow_cache
+            self.fetch_tasks()           # populates _tasks_cache
 
     def get_today_events(self) -> List[Dict[str, Any]]:
         """Get today's events (cached, auto-refreshing)."""
         self._maybe_refresh()
         return self._events_cache
+
+    def get_tomorrow_events(self) -> List[Dict[str, Any]]:
+        """Get tomorrow's events (cached, auto-refreshing)."""
+        self._maybe_refresh()
+        return self._tomorrow_cache
+
+    def get_tasks(self) -> List[Dict[str, Any]]:
+        """Get pending Google Tasks due today or tomorrow (cached, auto-refreshing)."""
+        self._maybe_refresh()
+        return self._tasks_cache
 
     def get_current_event(self) -> Optional[Dict[str, Any]]:
         """Get the event happening right now, if any."""
@@ -184,11 +290,11 @@ class CalendarSync:
         return None
 
     def get_next_event(self) -> Optional[Dict[str, Any]]:
-        """Get the next upcoming event."""
+        """Get the next upcoming event, searching today then tomorrow."""
         self._maybe_refresh()
         now = datetime.now(timezone.utc)
 
-        for event in self._events_cache:
+        for event in self._events_cache + self._tomorrow_cache:
             try:
                 start = datetime.fromisoformat(event["start"].replace("Z", "+00:00"))
                 if start > now:

@@ -88,11 +88,15 @@ def api_status():
 
         phone_detected = False
         confidence = 0.0
+        face_visible = True
+        actively_on_phone = False
         on_cooldown = False
 
         if _detector and _detector._latest_result:
-            phone_detected = _detector._latest_result.detected
-            confidence = _detector._latest_result.confidence
+            phone_detected    = _detector._latest_result.detected
+            confidence        = _detector._latest_result.confidence
+            face_visible      = _detector._latest_result.face_visible
+            actively_on_phone = _detector._latest_result.actively_on_phone
 
         if _scare:
             on_cooldown = _scare.is_on_cooldown()
@@ -115,6 +119,8 @@ def api_status():
     return jsonify({
         "phone_detected": phone_detected,
         "confidence": round(confidence, 3),
+        "face_visible": face_visible,
+        "actively_on_phone": actively_on_phone,
         "on_cooldown": on_cooldown,
         "kill_count_today": today.get("kill_count", 0),
         "current_streak": round(streak, 1),
@@ -144,13 +150,17 @@ def api_stats():
 
 @app.route("/api/calendar")
 def api_calendar():
-    """Today's calendar events."""
+    """Today's + tomorrow's calendar events, plus pending tasks."""
     if _calendar is None or not _calendar.is_authenticated:
-        return jsonify({"events": [], "authenticated": False})
+        return jsonify({"events": [], "tomorrow_events": [], "tasks": [], "authenticated": False})
 
-    events = _calendar.get_today_events()
+    events          = _calendar.get_today_events()
+    tomorrow_events = _calendar.get_tomorrow_events()
+    tasks           = _calendar.get_tasks()
     return jsonify({
         "events": events,
+        "tomorrow_events": tomorrow_events,
+        "tasks": tasks,
         "authenticated": True,
     })
 

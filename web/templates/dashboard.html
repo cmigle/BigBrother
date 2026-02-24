@@ -61,6 +61,18 @@
         </div>
     </div>
 
+    <!-- Tomorrow's events -->
+    <div class="section" id="tomorrow-section" style="display:none;">
+        <h2 class="section-title">Tomorrow</h2>
+        <div id="tomorrow-events" class="calendar-list"></div>
+    </div>
+
+    <!-- Pending tasks -->
+    <div class="section" id="tasks-section" style="display:none;">
+        <h2 class="section-title">Pending Tasks</h2>
+        <div id="pending-tasks" class="calendar-list"></div>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -120,10 +132,18 @@ function updateDashboard() {
             const icon   = document.getElementById('status-icon');
 
             if (data.phone_detected) {
-                banner.className = 'status-banner status-danger';
-                text.textContent = 'PHONE DETECTED — FIRING!';
-                conf.textContent = 'CONFIDENCE: ' + (data.confidence * 100).toFixed(1) + '%';
-                icon.textContent = '⊗';
+                if (data.actively_on_phone) {
+                    banner.className = 'status-banner status-danger';
+                    text.textContent = 'PHONE ACTIVE — FIRING!';
+                    conf.textContent = 'CONFIDENCE: ' + (data.confidence * 100).toFixed(1) + '%';
+                    icon.textContent = '⊗';
+                } else {
+                    // Phone detected but user is looking at screen — passive
+                    banner.className = 'status-banner status-warning';
+                    text.textContent = 'PHONE ON TABLE — passive';
+                    conf.textContent = 'Face on screen ✓';
+                    icon.textContent = '📵';
+                }
             } else {
                 banner.className = 'status-banner status-clear';
                 text.textContent = 'ALL CLEAR';
@@ -193,35 +213,71 @@ function updateCalendar() {
             const container = document.getElementById('calendar-events');
             if (!data.authenticated) {
                 container.innerHTML = '<p class="muted">Google Calendar not connected. Add credentials.json to config/ and restart.</p>';
-                return;
-            }
-            if (data.events.length === 0) {
-                container.innerHTML = '<p class="muted">No events today.</p>';
+                document.getElementById('tomorrow-section').style.display = 'none';
+                document.getElementById('tasks-section').style.display = 'none';
                 return;
             }
 
+            // ── Today ────────────────────────────────────────────────
             const now = Date.now();
-            let html = '';
-            data.events.forEach(ev => {
-                const start = ev.start ? new Date(ev.start) : null;
-                const end   = ev.end   ? new Date(ev.end)   : null;
-                const startStr = start ? start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-                const endStr   = end   ? end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-                const isActive = start && end && now >= start.getTime() && now <= end.getTime();
-                html += `
-                    <div class="calendar-event${isActive ? ' event-active' : ''}">
-                        <label class="event-check">
-                            <input type="checkbox"
-                                onchange="completeTask('${ev.id}', this)"
-                                ${ev.summary.startsWith('✅') ? 'checked disabled' : ''}>
-                            <span class="event-summary">${ev.summary}</span>
-                        </label>
-                        <span class="event-time">${startStr}${endStr ? ' – ' + endStr : ''}</span>
+            container.innerHTML = (!data.events || data.events.length === 0)
+                ? '<p class="muted">No events today.</p>'
+                : renderEvents(data.events, now);
+
+            // ── Tomorrow ─────────────────────────────────────────────
+            const tomorrowSec = document.getElementById('tomorrow-section');
+            const tomorrowDiv = document.getElementById('tomorrow-events');
+            if (data.tomorrow_events && data.tomorrow_events.length > 0) {
+                tomorrowDiv.innerHTML = renderEvents(data.tomorrow_events, -1);
+                tomorrowSec.style.display = '';
+            } else {
+                tomorrowSec.style.display = 'none';
+            }
+
+            // ── Tasks ─────────────────────────────────────────────────
+            const tasksSec = document.getElementById('tasks-section');
+            const tasksDiv = document.getElementById('pending-tasks');
+            if (data.tasks && data.tasks.length > 0) {
+                let html = '';
+                data.tasks.forEach(t => {
+                    const due  = t.due ? new Date(t.due).toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'}) : '';
+                    const meta = due ? `<span class="event-time">due ${due}</span>`
+                                     : (t.tasklist ? `<span class="event-time">${t.tasklist}</span>` : '');
+                    html += `<div class="calendar-event">
+                        <span class="event-summary">📋 ${t.title}</span>
+                        ${meta}
                     </div>`;
-            });
-            container.innerHTML = html;
+                });
+                tasksDiv.innerHTML = html;
+                tasksSec.style.display = '';
+            } else {
+                tasksSec.style.display = 'none';
+            }
         })
         .catch(err => console.error('Calendar fetch error:', err));
+}
+
+function renderEvents(events, nowMs) {
+    let html = '';
+    events.forEach(ev => {
+        const start    = ev.start ? new Date(ev.start) : null;
+        const end      = ev.end   ? new Date(ev.end)   : null;
+        const startStr = start ? start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+        const endStr   = end   ? end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})   : '';
+        const isActive = nowMs > 0 && start && end &&
+                         nowMs >= start.getTime() && nowMs <= end.getTime();
+        html += `
+            <div class="calendar-event${isActive ? ' event-active' : ''}">
+                <label class="event-check">
+                    <input type="checkbox"
+                        onchange="completeTask('${ev.id}', this)"
+                        ${ev.summary.startsWith('✅') ? 'checked disabled' : ''}>
+                    <span class="event-summary">${ev.summary}</span>
+                </label>
+                <span class="event-time">${startStr}${endStr ? ' – ' + endStr : ''}</span>
+            </div>`;
+    });
+    return html;
 }
 
 function completeTask(eventId, checkbox) {

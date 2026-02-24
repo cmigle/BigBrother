@@ -29,12 +29,14 @@ Context:
 - Day of week: {day_of_week}
 - Current calendar event: {current_event}
 - Next upcoming event: {next_event}
+- Pending tasks: {pending_tasks}
 - Times caught today: {kill_count}
 - Time since last caught: {time_since_last}
 
 Rules:
 - Be funny and sarcastic but not mean-spirited
 - If there is a current calendar event, reference it by name
+- If there are pending tasks, mention one of them by name to shame the user
 - If NO event is currently scheduled (event says "Nothing scheduled"), make an EDUCATED GUESS about what they should be doing based on the time and day — e.g. if it's evening on a weekday guess they have assignments/studying, if it's morning guess they have work/classes, if it's late guess they should sleep. Be specific and creative with the guess.
 - If they've been caught many times today, roast them harder
 - Keep it under 3 sentences
@@ -132,15 +134,15 @@ class AICoach:
         now = datetime.now()
         current_event = self._get_current_event_text()
         next_event = self._get_next_event_text()
+        pending_tasks = self._get_pending_tasks_text()
         kill_count = self.stats.get_today_stats().get("kill_count", 0)
         time_since = self._format_time_since_last()
         current_time = now.strftime("%I:%M %p")
         day_of_week = now.strftime("%A")
 
         # Try Ollama
-        roast = self._try_ollama(current_time, day_of_week, current_event, next_event, kill_count, time_since)
+        roast = self._try_ollama(current_time, day_of_week, current_event, next_event, pending_tasks, kill_count, time_since)
 
-        # Fallback
         if roast is None:
             roast = self._fallback_roast(current_event, next_event, kill_count)
 
@@ -154,7 +156,7 @@ class AICoach:
 
     def _try_ollama(
         self, current_time: str, day_of_week: str, current_event: str, next_event: str,
-        kill_count: int, time_since: str,
+        pending_tasks: str, kill_count: int, time_since: str,
     ) -> Optional[str]:
         """Attempt to generate a roast via Ollama. Returns None on failure."""
         prompt = DRILL_SERGEANT_PROMPT.format(
@@ -162,6 +164,7 @@ class AICoach:
             day_of_week=day_of_week,
             current_event=current_event,
             next_event=next_event,
+            pending_tasks=pending_tasks,
             kill_count=kill_count,
             time_since_last=time_since,
         )
@@ -316,8 +319,27 @@ class AICoach:
             return "Nothing coming up"
         ev = self.calendar.get_next_event()
         if ev:
-            return ev.get("summary", "Untitled event")
+            label = ev.get("summary", "Untitled event")
+            if ev.get("day") == "tomorrow":
+                label += " (tomorrow)"
+            return label
         return "Nothing coming up"
+
+    def _get_pending_tasks_text(self) -> str:
+        """Return a short summary of pending Google Tasks (today + tomorrow)."""
+        if self.calendar is None:
+            return "No tasks"
+        try:
+            tasks = self.calendar.get_tasks()
+            if not tasks:
+                return "No pending tasks"
+            names = [t.get("title", "Untitled task") for t in tasks[:3]]
+            summary = ", ".join(names)
+            if len(tasks) > 3:
+                summary += f" (+{len(tasks) - 3} more)"
+            return summary
+        except Exception:
+            return "No tasks"
 
     def _format_time_since_last(self) -> str:
         if self._last_roast_time == 0:
