@@ -81,24 +81,43 @@ DEFAULT_CONFIG = {
 
 
 def load_config(path: str = "config/settings.yaml") -> dict:
-    """Load settings from YAML, merging with defaults."""
+    """Load settings from YAML, merging with defaults.
+
+    Load order (later layers win):
+      1. DEFAULT_CONFIG hardcoded defaults
+      2. config/settings.yaml  (tracked — shared defaults)
+      3. config/local.yaml     (gitignored — personal overrides, never committed)
+    """
     config = DEFAULT_CONFIG.copy()
+
+    def _merge(base: dict, override: dict):
+        for section, values in override.items():
+            if section in base and isinstance(values, dict):
+                base[section].update(values)
+            else:
+                base[section] = values
 
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
-            # Deep merge
-            for section, values in user_config.items():
-                if section in config and isinstance(values, dict):
-                    config[section].update(values)
-                else:
-                    config[section] = values
+            _merge(config, user_config)
             logger.info("Configuration loaded from %s", path)
         except Exception as exc:
             logger.warning("Could not load config from %s: %s — using defaults", path, exc)
     else:
         logger.info("No config file found at %s — using defaults", path)
+
+    # Personal override layer — gitignored, never committed
+    local_path = "config/local.yaml"
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                local_config = yaml.safe_load(f) or {}
+            _merge(config, local_config)
+            logger.info("Local overrides loaded from %s", local_path)
+        except Exception as exc:
+            logger.warning("Could not load local config from %s: %s", local_path, exc)
 
     return config
 

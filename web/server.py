@@ -192,6 +192,15 @@ def api_guess():
     return jsonify({"guess": guess, "has_current_event": has_event})
 
 
+@app.route("/api/cameras")
+def api_cameras():
+    """List all available camera indices detected on this machine."""
+    from core.phone_detector import PhoneDetector
+    cameras = PhoneDetector.list_cameras()
+    current = _detector.camera_index if _detector else 0
+    return jsonify({"cameras": cameras, "current": current})
+
+
 @app.route("/api/settings", methods=["GET", "POST"])
 def api_settings():
     """Get or update settings."""
@@ -211,6 +220,13 @@ def api_settings():
         _scare.update_settings(cooldown=float(data["cooldown_seconds"]))
     if "escalation_enabled" in data and _scare:
         _scare.update_settings(escalation_enabled=bool(data["escalation_enabled"]))
+    if "filter_screens" in data and _detector:
+        _detector.update_settings(filter_screens=bool(data["filter_screens"]))
+    if "camera_index" in data and _detector:
+        new_cam = int(data["camera_index"])
+        if new_cam != _detector.camera_index:
+            import threading as _t
+            _t.Thread(target=_detector.switch_camera, args=(new_cam,), daemon=True).start()
 
     return jsonify({"success": True})
 

@@ -7,6 +7,24 @@
 
     <form id="settings-form" class="settings-form">
 
+        <!-- Camera -->
+        <div class="settings-section">
+            <h2 class="section-title">Camera</h2>
+            <div class="setting-row">
+                <label for="camera-select">Active Camera</label>
+                <select id="camera-select" style="background:var(--bg-input);border:1px solid var(--border);color:var(--fg);padding:6px 10px;font-family:var(--font);font-size:0.84rem;border-radius:var(--radius);flex:1;max-width:320px;outline:none;cursor:pointer;">
+                    <option value="">Scanning…</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label for="filter-screens">Suppress Monitors / Screens</label>
+                <label class="toggle">
+                    <input type="checkbox" id="filter-screens" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- Detection -->
         <div class="settings-section">
             <h2 class="section-title">Detection</h2>
@@ -90,7 +108,30 @@ const volSlider = document.getElementById('volume');
 const volVal = document.getElementById('volume-val');
 volSlider.addEventListener('input', () => volVal.textContent = Math.round(volSlider.value * 100) + '%');
 
-// Load current settings
+// ── Camera list ──────────────────────────────────────────────────
+const camSelect = document.getElementById('camera-select');
+fetch('/api/cameras')
+    .then(r => r.json())
+    .then(data => {
+        camSelect.innerHTML = '';
+        if (!data.cameras || data.cameras.length === 0) {
+            camSelect.innerHTML = '<option value="0">Camera 0 (default)</option>';
+            return;
+        }
+        data.cameras.forEach(cam => {
+            const opt = document.createElement('option');
+            opt.value = cam.index;
+            const res = cam.width ? ` — ${cam.width}×${cam.height} @${cam.fps}fps` : '';
+            opt.textContent = `Camera ${cam.index}${res}`;
+            if (cam.index === data.current) opt.selected = true;
+            camSelect.appendChild(opt);
+        });
+    })
+    .catch(() => {
+        camSelect.innerHTML = '<option value="0">Camera 0 (default)</option>';
+    });
+
+// ── Load current settings ────────────────────────────────────────
 fetch('/api/settings')
     .then(r => r.json())
     .then(data => {
@@ -98,6 +139,7 @@ fetch('/api/settings')
             confSlider.value = data.detection.confidence_threshold || 0.5;
             confVal.textContent = parseFloat(confSlider.value).toFixed(2);
             document.getElementById('min-duration').value = data.detection.min_duration || 2.0;
+            document.getElementById('filter-screens').checked = data.detection.filter_screens !== false;
         }
         if (data.scare) {
             volSlider.value = data.scare.volume || 1.0;
@@ -115,6 +157,7 @@ fetch('/api/settings')
         }
     });
 
+// ── Save ─────────────────────────────────────────────────────────
 document.getElementById('settings-form').addEventListener('submit', function(e) {
     e.preventDefault();
 
@@ -123,6 +166,8 @@ document.getElementById('settings-form').addEventListener('submit', function(e) 
         volume: parseFloat(volSlider.value),
         cooldown_seconds: parseInt(document.getElementById('cooldown').value),
         escalation_enabled: document.getElementById('escalation').checked,
+        filter_screens: document.getElementById('filter-screens').checked,
+        camera_index: parseInt(camSelect.value) || 0,
     };
 
     fetch('/api/settings', {

@@ -29,6 +29,9 @@ Thumbs.db
 config/credentials.json
 config/token.json
 
+# Personal overrides (camera, calendar_id, etc.) — create your own from local.yaml.example
+config/local.yaml
+
 # Data (optional — uncomment to track stats in git)
 # data/stats.json
 # data/roast_history.json

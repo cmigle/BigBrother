@@ -8,47 +8,55 @@
    CSS Variables
    ================================================================ */
 :root {
-    --bg:          #080c08;
-    --bg-panel:    #0c110c;
-    --bg-card:     #0f160f;
-    --bg-hover:    #141e14;
-    --bg-input:    #0a0f0a;
+    --bg:          #080b10;
+    --bg-panel:    #0b0f18;
+    --bg-card:     #0d1220;
+    --bg-hover:    #111826;
+    --bg-input:    #070a12;
 
-    --fg:          #9fef9f;
-    --fg-dim:      #4a7a4a;
-    --fg-faint:    #243624;
-    --fg-white:    #d4e8d4;
+    --fg:          #7ee8f5;
+    --fg-dim:      #3a6a7a;
+    --fg-faint:    #0f1f2a;
+    --fg-white:    #deeef4;
 
-    --green:       #39ff14;
-    --green-mid:   #1db81d;
-    --green-dim:   #0d5c0d;
-    --red:         #ff2d2d;
-    --red-mid:     #cc1111;
-    --red-dim:     #3a0808;
-    --orange:      #ff7700;
-    --orange-dim:  #7a3800;
-    --yellow:      #f0d000;
+    /* Primary accent — CYAN */
     --cyan:        #00e5ff;
+    --cyan-mid:    #00b8cc;
+    --cyan-dim:    #004a5c;
+    --glow-cyan:   0 0 8px rgba(0, 229, 255, 0.28), 0 0 22px rgba(0, 229, 255, 0.10);
+
+    /* Green aliases → cyan so old var(--green) refs still work */
+    --green:       var(--cyan);
+    --green-mid:   var(--cyan-mid);
+    --green-dim:   var(--cyan-dim);
+    --glow-green:  var(--glow-cyan);
+    --accent-green: var(--cyan);
+
+    /* Status colors — softened */
+    --red:         #e05555;
+    --red-mid:     #b03030;
+    --red-dim:     #2a1414;
+    --orange:      #ff8c00;
+    --orange-dim:  #7a4000;
+    --yellow:      #f0d000;
     --purple:      #bd93f9;
 
-    --border:      #1a2e1a;
-    --border-mid:  #254025;
-    --border-bright: #3a6a3a;
+    --border:      #0f1e30;
+    --border-mid:  #1a3448;
+    --border-bright: #2a5572;
 
-    --glow-green:  0 0 8px rgba(57, 255, 20, 0.25), 0 0 20px rgba(57, 255, 20, 0.08);
-    --glow-red:    0 0 8px rgba(255, 45, 45, 0.35), 0 0 20px rgba(255, 45, 45, 0.15);
-    --glow-orange: 0 0 8px rgba(255, 119, 0, 0.3);
+    --glow-red:    0 0 8px rgba(224, 85, 85, 0.35), 0 0 20px rgba(224, 85, 85, 0.15);
+    --glow-orange: 0 0 8px rgba(255, 140, 0, 0.3);
 
     --radius:      4px;
     --radius-lg:   8px;
     --font:        'JetBrains Mono', 'Consolas', 'Courier New', monospace;
     --transition:  0.2s ease;
 
-    /* legacy aliases so old classes still work */
+    /* Legacy aliases */
     --bg-primary:   var(--bg);
     --bg-secondary: var(--bg-panel);
     --accent-red:   var(--red);
-    --accent-green: var(--green);
     --accent-orange: var(--orange);
     --text-primary: var(--fg-white);
     --text-secondary: var(--fg-dim);
@@ -125,7 +133,7 @@ body::after {
 .typewriter-cursor::after {
     content: '█';
     animation: blink 1s step-end infinite;
-    color: var(--green);
+    color: var(--cyan);
     margin-left: 2px;
     font-size: 0.9em;
 }
@@ -182,7 +190,7 @@ body::after {
     transition: all var(--transition);
     border-bottom: 2px solid transparent;
 }
-.nav-link:hover { color: var(--fg-white); background: rgba(57,255,20,0.04); }
+.nav-link:hover { color: var(--fg-white); background: rgba(0,229,255,0.04); }
 .nav-link.active { color: var(--green); border-bottom-color: var(--green); text-shadow: var(--glow-green); }
 
 /* ================================================================
@@ -243,15 +251,15 @@ body::after {
     top: -5%;
     left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(57,255,20,0.45), transparent);
+    background: linear-gradient(90deg, transparent, rgba(0,229,255,0.35), transparent);
     animation: scan-sweep 3s linear infinite;
     pointer-events: none;
 }
 @keyframes scan-sweep { from{top:-5%} to{top:105%} }
 
 .status-clear {
-    background: linear-gradient(135deg, #050f05, var(--bg-card));
-    border-color: var(--green-dim);
+    background: linear-gradient(135deg, #030810, var(--bg-card));
+    border-color: var(--cyan-dim);
 }
 .status-danger {
     background: linear-gradient(135deg, #1a0303, var(--bg-card));
@@ -263,8 +271,8 @@ body::after {
 }
 
 @keyframes pulse-danger {
-    0%,100% { box-shadow: 0 0 15px rgba(255,45,45,0.15); }
-    50%      { box-shadow: 0 0 40px rgba(255,45,45,0.45); }
+    0%,100% { box-shadow: 0 0 15px rgba(224,85,85,0.15); }
+    50%      { box-shadow: 0 0 40px rgba(224,85,85,0.40); }
 }
 
 .status-icon { font-size: 2.4rem; margin-bottom: 0.3rem; }
@@ -418,8 +426,8 @@ body::after {
 }
 .calendar-event:hover { border-color: var(--border-mid); }
 .calendar-event.event-active {
-    border-color: var(--green-dim);
-    background: linear-gradient(90deg, rgba(57,255,20,0.03), var(--bg-card));
+    border-color: var(--cyan-dim);
+    background: linear-gradient(90deg, rgba(0,229,255,0.03), var(--bg-card));
 }
 
 .event-check { display: flex; align-items: center; gap: 0.7rem; cursor: pointer; }
@@ -533,7 +541,7 @@ body::after {
     margin-top: 1rem;
     transition: all var(--transition);
 }
-.btn-save:hover { background: rgba(57,255,20,0.07); box-shadow: var(--glow-green); }
+.btn-save:hover { background: rgba(0,229,255,0.07); box-shadow: var(--glow-cyan); }
 
 .save-feedback { margin-top: 0.75rem; color: var(--green); font-size: 0.8rem; letter-spacing: 1px; }
 

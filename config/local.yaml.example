@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────
+# config/local.yaml  — personal overrides (copy this file)
+#
+# Copy to config/local.yaml and edit as needed.
+# This file is listed in .gitignore and will NEVER be committed.
+# Values here win over config/settings.yaml.
+# ─────────────────────────────────────────────────────────────────
+
+# Pick your webcam index (run `python main.py --list-cameras` to list them)
+# detection:
+#   camera_index: 1
+
+# Your Google Calendar ID — found in Calendar settings → Integrate calendar
+# calendar:
+#   calendar_id: "yourname@gmail.com"
+
+# Use a different local LLM or Ollama URL
+# ai_coach:
+#   ollama_model: "mistral"
+#   ollama_url: "http://localhost:11434"

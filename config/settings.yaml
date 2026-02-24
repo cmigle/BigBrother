@@ -5,6 +5,10 @@ detection:
   # Set to -1 to auto-select the first available camera at startup
   camera_index: 0
   roi: null
+  # Suppress phones that are likely just reflections on monitors or iPads
+  filter_screens: true
+  screen_overlap_threshold: 0.4   # IoU fraction — lower = stricter suppression
+  max_phone_area_fraction: 0.20   # Bboxes > 20% of frame area treated as tablets
 
 # Camera calibration — leave a value as null to keep the driver default.
 # Run `python main.py --list-cameras` to see available camera indices.

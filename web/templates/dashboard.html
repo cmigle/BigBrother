@@ -6,7 +6,7 @@
 
     <!-- Status banner -->
     <div id="status-banner" class="status-banner status-clear">
-        <div class="status-icon" id="status-icon">◎</div>
+        <div class="status-icon" id="status-icon">👁</div>
         <div class="status-text typewriter-cursor" id="status-text">ALL CLEAR</div>
         <div class="status-confidence" id="status-confidence"></div>
     </div>
@@ -117,7 +117,7 @@ function updateDashboard() {
                 banner.className = 'status-banner status-clear';
                 text.textContent = 'ALL CLEAR';
                 conf.textContent = '';
-                icon.textContent = '◎';
+                icon.textContent = '👁';
             }
 
             document.getElementById('kill-count').textContent = data.kill_count_today;
