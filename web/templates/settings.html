@@ -60,6 +60,32 @@
             </div>
         </div>
 
+        <!-- Process / Browser Monitor -->
+        <div class="settings-section">
+            <h2 class="section-title">Process Monitor</h2>
+            <div class="setting-row">
+                <label for="pm-enabled">Enable Process Monitor</label>
+                <label class="toggle">
+                    <input type="checkbox" id="pm-enabled" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label for="pm-web">Detect Browser Tabs</label>
+                <label class="toggle">
+                    <input type="checkbox" id="pm-web" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label for="pm-apps">Detect Distracting Apps</label>
+                <label class="toggle">
+                    <input type="checkbox" id="pm-apps" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- AI Coach -->
         <div class="settings-section">
             <h2 class="section-title">AI Coach</h2>
@@ -155,6 +181,11 @@ fetch('/api/settings')
             document.getElementById('serial-enabled').checked = data.hardware.serial_enabled === true;
             document.getElementById('serial-port').value = data.hardware.serial_port || 'COM3';
         }
+        if (data.process_monitor) {
+            document.getElementById('pm-enabled').checked = data.process_monitor.enabled !== false;
+            document.getElementById('pm-web').checked  = data.process_monitor.check_web  !== false;
+            document.getElementById('pm-apps').checked = data.process_monitor.check_apps !== false;
+        }
     });
 
 // ── Save ─────────────────────────────────────────────────────────
@@ -168,6 +199,9 @@ document.getElementById('settings-form').addEventListener('submit', function(e) 
         escalation_enabled: document.getElementById('escalation').checked,
         filter_screens: document.getElementById('filter-screens').checked,
         camera_index: parseInt(camSelect.value) || 0,
+        pm_enabled:   document.getElementById('pm-enabled').checked,
+        pm_check_web: document.getElementById('pm-web').checked,
+        pm_check_apps: document.getElementById('pm-apps').checked,
     };
 
     fetch('/api/settings', {

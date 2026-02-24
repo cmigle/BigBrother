@@ -31,18 +31,20 @@ _coach = None
 _calendar = None
 _stats = None
 _config = {}
+_process_monitor = None
 _lock = threading.Lock()
 
 
-def init_app(detector, scare_system, ai_coach, calendar_sync, stats_tracker, config):
+def init_app(detector, scare_system, ai_coach, calendar_sync, stats_tracker, config, process_monitor=None):
     """Inject dependencies into the Flask app."""
-    global _detector, _scare, _coach, _calendar, _stats, _config
+    global _detector, _scare, _coach, _calendar, _stats, _config, _process_monitor
     _detector = detector
     _scare = scare_system
     _coach = ai_coach
     _calendar = calendar_sync
     _stats = stats_tracker
     _config = config
+    _process_monitor = process_monitor
 
 
 # ======================================================================
@@ -98,6 +100,18 @@ def api_status():
         latest_roast = _coach.get_latest_roast() if _coach else ""
         latest_guess = _coach.get_guess() if _coach else ""
 
+        # Process / browser distraction
+        distraction_detected = False
+        distraction_label    = ""
+        distraction_source   = ""
+        distraction_duration = 0.0
+        if _process_monitor:
+            pm = _process_monitor.get_latest()
+            distraction_detected = pm.detected
+            distraction_label    = pm.label
+            distraction_source   = pm.source
+            distraction_duration = round(pm.detection_duration, 1)
+
     return jsonify({
         "phone_detected": phone_detected,
         "confidence": round(confidence, 3),
@@ -106,6 +120,10 @@ def api_status():
         "current_streak": round(streak, 1),
         "latest_roast": latest_roast,
         "latest_guess": latest_guess,
+        "distraction_detected": distraction_detected,
+        "distraction_label":    distraction_label,
+        "distraction_source":   distraction_source,
+        "distraction_duration": distraction_duration,
     })
 
 
@@ -227,6 +245,12 @@ def api_settings():
         if new_cam != _detector.camera_index:
             import threading as _t
             _t.Thread(target=_detector.switch_camera, args=(new_cam,), daemon=True).start()
+    if "pm_enabled" in data and _process_monitor:
+        _process_monitor.update_settings(enabled=bool(data["pm_enabled"]))
+    if "pm_check_web" in data and _process_monitor:
+        _process_monitor.update_settings(check_web=bool(data["pm_check_web"]))
+    if "pm_check_apps" in data and _process_monitor:
+        _process_monitor.update_settings(check_apps=bool(data["pm_check_apps"]))
 
     return jsonify({"success": True})
 

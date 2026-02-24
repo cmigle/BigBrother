@@ -56,6 +56,30 @@
 let weeklyChart = null;
 let hoursChart = null;
 
+// ── Chart.js global defaults ─────────────────────────────────────
+Chart.defaults.color           = '#7ee8f5';   // --fg
+Chart.defaults.borderColor     = '#0f1e30';   // --border
+Chart.defaults.font.family     = "'JetBrains Mono', 'Consolas', monospace";
+Chart.defaults.font.size       = 11;
+Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(11,15,24,0.92)';
+Chart.defaults.plugins.tooltip.borderColor     = '#1a3448';
+Chart.defaults.plugins.tooltip.borderWidth     = 1;
+Chart.defaults.plugins.tooltip.titleColor      = '#deeef4';
+Chart.defaults.plugins.tooltip.bodyColor       = '#7ee8f5';
+Chart.defaults.plugins.tooltip.padding         = 10;
+
+const CHART_SCALES = {
+    y: {
+        beginAtZero: true,
+        ticks: { color: '#deeef4', font: { size: 11 } },
+        grid:  { color: '#0f1e30' },
+    },
+    x: {
+        ticks: { color: '#deeef4', font: { size: 11 } },
+        grid:  { color: '#0f1e30' },
+    },
+};
+
 function formatStreak(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -90,18 +114,19 @@ function loadStats() {
                         datasets: [{
                             label: 'Kills',
                             data: values,
-                            backgroundColor: 'rgba(255,45,45,0.7)',
-                            borderColor: 'var(--red)',
+                            backgroundColor: 'rgba(224, 85, 85, 0.55)',
+                            borderColor:     'rgba(224, 85, 85, 0.9)',
                             borderWidth: 1,
+                            borderRadius: 3,
                         }],
                     },
                     options: {
                         responsive: true,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            y: { beginAtZero: true, ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
-                            x: { ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y + ' kills' } },
                         },
+                        scales: CHART_SCALES,
                     },
                 });
             }
@@ -123,17 +148,24 @@ function loadStats() {
                         datasets: [{
                             label: 'Kills',
                             data: hourValues,
-                            backgroundColor: 'rgba(255,119,0,0.7)',
-                            borderColor: 'var(--orange)',
+                            backgroundColor: 'rgba(255,140,0, 0.55)',
+                            borderColor:     'rgba(255,140,0, 0.9)',
                             borderWidth: 1,
+                            borderRadius: 3,
                         }],
                     },
                     options: {
                         responsive: true,
-                        plugins: { legend: { display: false } },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y + ' kills' } },
+                        },
                         scales: {
-                            y: { beginAtZero: true, ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
-                            x: { ticks: { color: '#4a7a4a', maxRotation: 45 }, grid: { color: '#1a2e1a' } },
+                            ...CHART_SCALES,
+                            x: {
+                                ticks: { color: '#deeef4', font: { size: 10 }, maxRotation: 45 },
+                                grid:  { color: '#0f1e30' },
+                            },
                         },
                     },
                 });

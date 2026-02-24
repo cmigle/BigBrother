@@ -55,3 +55,11 @@ calendar:
 web:
   host: "0.0.0.0"
   port: 5000
+
+# Process and browser-tab distraction monitor
+process_monitor:
+  enabled: true
+  poll_interval: 2.0       # seconds between scans
+  check_web:  true          # detect Instagram/TikTok/etc. in browser tab titles
+  check_apps: true          # detect Steam/Discord/games by process name
+  min_duration: 3.0         # seconds before the scare system fires

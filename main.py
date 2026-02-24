@@ -77,6 +77,13 @@ DEFAULT_CONFIG = {
         "host": "0.0.0.0",
         "port": 5000,
     },
+    "process_monitor": {
+        "enabled": True,
+        "poll_interval": 2.0,
+        "check_web": True,
+        "check_apps": True,
+        "min_duration": 3.0,   # seconds of continuous distraction before triggering
+    },
 }
 
 
@@ -132,6 +139,7 @@ def init_modules(config: dict):
     from core.ai_coach import AICoach
     from core.scare_system import ScareSystem
     from core.phone_detector import PhoneDetector
+    from core.process_monitor import ProcessMonitor
 
     # Stats
     stats = StatsTracker(stats_path="data/stats.json")
@@ -212,6 +220,12 @@ def init_modules(config: dict):
         "calendar": calendar,
         "stats": stats,
         "serial_gun": serial_gun,
+        "process_monitor": ProcessMonitor(
+            enabled=config.get("process_monitor", {}).get("enabled", True),
+            poll_interval=config.get("process_monitor", {}).get("poll_interval", 2.0),
+            check_web=config.get("process_monitor", {}).get("check_web", True),
+            check_apps=config.get("process_monitor", {}).get("check_apps", True),
+        ),
     }
 
 
@@ -220,22 +234,26 @@ def init_modules(config: dict):
 _running = True
 
 
-def detection_loop(detector, scare, config):
+def detection_loop(detector, scare, config, process_monitor=None):
     """
     Main detection loop — runs in a background thread.
 
     Captures frames, runs YOLOv8 inference, and triggers the scare
     system when a phone is detected for long enough.
+    Also checks ProcessMonitor for web/app distractions.
     """
     det_cfg = config["detection"]
-    min_duration = det_cfg["min_duration"]
+    pm_cfg  = config.get("process_monitor", {})
+    min_duration    = det_cfg["min_duration"]
+    pm_min_duration = pm_cfg.get("min_duration", 3.0)
 
     if not detector.open_camera():
         logger.error("Failed to open camera — detection loop aborting")
         return
 
     logger.info("Detection loop started (min_duration=%.1fs)", min_duration)
-    triggered = False
+    triggered   = False
+    pm_triggered = False
 
     try:
         while _running:
@@ -246,9 +264,9 @@ def detection_loop(detector, scare, config):
 
             result = detector.process_frame(frame)
 
+            # ── Camera phone detection ──────────────────────────────────
             if detector.is_phone_persistent(min_duration):
                 if not triggered:
-                    # First trigger
                     scare.trigger(result.detection_duration)
                     triggered = True
                 elif scare.should_escalate(result.detection_duration):
@@ -257,6 +275,22 @@ def detection_loop(detector, scare, config):
                 if triggered:
                     scare.stop_escalation()
                     triggered = False
+
+            # ── Process / browser-tab distraction detection ─────────────
+            if process_monitor and process_monitor.enabled:
+                pm_result = process_monitor.get_latest()
+                if pm_result.detected and pm_result.detection_duration >= pm_min_duration:
+                    if not pm_triggered:
+                        logger.info(
+                            "Process distraction: %s (%s) — triggering scare",
+                            pm_result.label, pm_result.source,
+                        )
+                        scare.trigger(pm_result.detection_duration)
+                        pm_triggered = True
+                else:
+                    if pm_triggered:
+                        scare.stop_escalation()
+                        pm_triggered = False
 
             # ~15 FPS
             time.sleep(0.066)
@@ -349,19 +383,23 @@ def main():
     logger.info("Initialising modules...")
     modules = init_modules(config)
     detector = modules["detector"]
-    scare = modules["scare"]
-    coach = modules["coach"]
+    scare    = modules["scare"]
+    coach    = modules["coach"]
     calendar = modules["calendar"]
-    stats = modules["stats"]
+    stats    = modules["stats"]
+    process_monitor = modules["process_monitor"]
+
+    # Start process monitor background thread
+    process_monitor.start()
 
     # Inject into Flask
     from web.server import init_app, run_server
-    init_app(detector, scare, coach, calendar, stats, config)
+    init_app(detector, scare, coach, calendar, stats, config, process_monitor)
 
     # Start detection loop in background thread
     det_thread = threading.Thread(
         target=detection_loop,
-        args=(detector, scare, config),
+        args=(detector, scare, config, process_monitor),
         daemon=True,
     )
     det_thread.start()
@@ -371,6 +409,7 @@ def main():
         global _running
         logger.info("Shutting down...")
         _running = False
+        process_monitor.stop()
         detector.release_camera()
         if modules["serial_gun"].is_connected:
             modules["serial_gun"].disconnect()

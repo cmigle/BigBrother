@@ -290,6 +290,56 @@ body::after {
 .status-confidence { font-size: 0.78rem; color: var(--fg-dim); margin-top: 0.3rem; letter-spacing: 1px; }
 
 /* ================================================================
+   Distraction Card (process / browser-tab monitor)
+   ================================================================ */
+.distraction-card {
+    background: var(--bg-card);
+    border: 1px solid var(--orange-dim);
+    border-left: 3px solid var(--yellow);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.4rem;
+    margin-bottom: 1.5rem;
+    position: relative;
+    animation: distraction-pulse 2s ease-in-out infinite;
+}
+@keyframes distraction-pulse {
+    0%,100% { box-shadow: 0 0 10px rgba(240,208,0,0.08); }
+    50%      { box-shadow: 0 0 22px rgba(240,208,0,0.22); }
+}
+
+.distraction-label {
+    font-size: 0.68rem;
+    color: var(--yellow);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.distraction-duration {
+    margin-left: auto;
+    font-size: 0.68rem;
+    color: var(--fg-dim);
+    letter-spacing: 1px;
+}
+
+.distraction-app {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--fg-white);
+    letter-spacing: 1px;
+    margin-bottom: 0.25rem;
+}
+
+.distraction-hint {
+    font-size: 0.78rem;
+    color: var(--fg-dim);
+    letter-spacing: 0.5px;
+}
+
+/* ================================================================
    Roast Card
    ================================================================ */
 .roast-card {
@@ -377,21 +427,21 @@ body::after {
     position: relative;
     transition: border-color var(--transition), box-shadow var(--transition);
 }
-.stat-card:hover { border-color: var(--border-bright); box-shadow: var(--glow-green); }
+.stat-card:hover { border-color: var(--border-bright); box-shadow: var(--glow-cyan); }
 .stat-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, var(--green-dim), transparent);
+    background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .stat-value {
     font-size: 2rem;
     font-weight: 700;
-    color: var(--green);
-    text-shadow: var(--glow-green);
+    color: var(--fg-white);
+    text-shadow: var(--glow-cyan);
     letter-spacing: -1px;
 }
 
@@ -403,11 +453,7 @@ body::after {
     margin-top: 0.3rem;
 }
 
-/* Stats page — kills in red */
-#total-kills, #weekly-kills, #daily-avg, #longest-streak {
-    color: var(--red);
-    text-shadow: var(--glow-red);
-}
+/* Stats page — big numbers keep white+cyan glow; killed the red override */
 
 /* ================================================================
    Calendar
@@ -608,6 +654,10 @@ body::after {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
+
+/* Inline links (e.g. camera page) */
+a { color: var(--cyan); text-decoration: none; transition: opacity var(--transition); }
+a:hover { opacity: 0.75; text-decoration: underline; }
 
 /* ================================================================
    Responsive

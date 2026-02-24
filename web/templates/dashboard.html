@@ -11,6 +11,17 @@
         <div class="status-confidence" id="status-confidence"></div>
     </div>
 
+    <!-- Process / browser-tab distraction warning -->
+    <div id="distraction-card" class="distraction-card" style="display:none;">
+        <div class="distraction-label">
+            <span id="distraction-source-icon">🖥️</span>
+            <span id="distraction-label-text">DISTRACTION DETECTED</span>
+            <span class="distraction-duration" id="distraction-duration"></span>
+        </div>
+        <div class="distraction-app" id="distraction-app"></div>
+        <div class="distraction-hint">Close it. Now. Eyes on the work.</div>
+    </div>
+
     <!-- AI Coach roast -->
     <div class="roast-card" id="roast-card" style="display:none;">
         <div class="roast-label">
@@ -126,6 +137,30 @@ function updateDashboard() {
             const cs = document.getElementById('cooldown-status');
             cs.textContent = data.on_cooldown ? 'COOLDOWN' : 'ARMED';
             cs.style.color = data.on_cooldown ? 'var(--yellow)' : 'var(--green)';
+
+            // Distraction card
+            const distrCard  = document.getElementById('distraction-card');
+            const distrApp   = document.getElementById('distraction-app');
+            const distrLabel = document.getElementById('distraction-label-text');
+            const distrIcon  = document.getElementById('distraction-source-icon');
+            const distrDur   = document.getElementById('distraction-duration');
+
+            if (data.distraction_detected) {
+                distrCard.style.display = 'block';
+                distrApp.textContent   = data.distraction_label || 'Unknown';
+                distrIcon.textContent  = data.distraction_source === 'web' ? '🌐' : '🔸';
+                distrLabel.textContent = data.distraction_source === 'web'
+                    ? 'BROWSER DISTRACTION DETECTED'
+                    : 'DISTRACTING APP DETECTED';
+                if (data.distraction_duration > 0) {
+                    const s = Math.round(data.distraction_duration);
+                    distrDur.textContent = s + 's';
+                } else {
+                    distrDur.textContent = '';
+                }
+            } else {
+                distrCard.style.display = 'none';
+            }
 
             // Roast
             const roastCard = document.getElementById('roast-card');
