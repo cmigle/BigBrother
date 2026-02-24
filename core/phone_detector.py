@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 # COCO class ID for cell phone
 CELL_PHONE_CLASS_ID = 67
 
+# COCO class ID for person
+PERSON_CLASS_ID = 0
+
+# Minimum fraction of phone bbox that must overlap a person bbox
+# for the phone to be considered held/actively used.
+# Overhead cameras: person body fills a region; phone held by hand is inside it.
+PERSON_OVERLAP_THRESHOLD = 0.25
+
 # COCO class IDs that represent screens / flat devices (suppress phone if overlapping)
 SCREEN_CLASS_IDS = [62, 63]  # 62=tv/monitor, 63=laptop (covers iPads sometimes)
 
@@ -88,26 +96,19 @@ class PhoneDetector:
         self.screen_overlap_threshold = screen_overlap_threshold
         self.max_phone_area_fraction = max_phone_area_fraction
 
-        # Face detector — used to decide whether the user is actively looking
-        # at the phone or whether it is just passively resting on the desk.
-        # When the user looks DOWN at their phone their face is no longer
-        # visible to the webcam, so face_visible=False + phone detected → active use.
-        self._face_cascade: Optional[cv2.CascadeClassifier] = None
-        try:
-            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            cascade = cv2.CascadeClassifier(cascade_path)
-            if not cascade.empty():
-                self._face_cascade = cascade
-                logger.info("Face detector (Haar cascade) loaded")
-            else:
-                logger.warning("Haar cascade empty — face-visibility check disabled")
-        except Exception as exc:
-            logger.warning("Could not load face cascade: %s — face-visibility check disabled", exc)
+        # Active-use detection strategy: check whether the phone bounding box
+        # overlaps significantly with a detected person (COCO class 0).
+        # This works for ANY camera angle, including overhead mounts:
+        #   - Phone held in hand/near body → inside person bbox → active
+        #   - Phone lying on desk corner  → outside person bbox → passive
+        # No extra models needed — person detection runs in the same YOLO pass.
 
         self._detection_start: Optional[float] = None
         self._phone_detected: bool = False   # raw phone visible
         self._active_start: Optional[float] = None
-        self._actively_on_phone: bool = False  # phone visible + face NOT visible
+        self._actively_on_phone: bool = False  # phone visible + overlaps person
+        # Last known person bboxes (for debug / UI)
+        self._last_person_boxes: List[Tuple[int, int, int, int]] = []
         self._latest_result: Optional[PhoneDetectionResult] = None
         self._latest_frame: Optional[np.ndarray] = None
         self._cap: Optional[cv2.VideoCapture] = None
@@ -242,8 +243,8 @@ class PhoneDetector:
         """
         result = PhoneDetectionResult()
 
-        # Detect phones AND screen classes in one pass for efficiency
-        detect_classes = [CELL_PHONE_CLASS_ID] + (SCREEN_CLASS_IDS if self.filter_screens else [])
+        # Detect phones, screen classes, AND persons in one pass
+        detect_classes = [PERSON_CLASS_ID, CELL_PHONE_CLASS_ID] + (SCREEN_CLASS_IDS if self.filter_screens else [])
         preds = self.model.predict(
             frame,
             classes=detect_classes,
@@ -258,8 +259,9 @@ class PhoneDetector:
         best_conf = 0.0
         best_box = None
 
-        # Collect screen bounding boxes first (for overlap suppression)
+        # Collect all box types in one pass
         screen_boxes: List[Tuple[int, int, int, int]] = []
+        person_boxes: List[Tuple[int, int, int, int]] = []
         phone_candidates: List[Tuple[float, Tuple[int, int, int, int]]] = []
 
         for det in preds:
@@ -270,7 +272,12 @@ class PhoneDetector:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                if cls_id in SCREEN_CLASS_IDS:
+                if cls_id == PERSON_CLASS_ID:
+                    person_boxes.append((x1, y1, x2, y2))
+                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 0), 1)
+                    cv2.putText(annotated, f"Person {conf:.2f}", (x1, y1 - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 0), 1)
+                elif cls_id in SCREEN_CLASS_IDS:
                     screen_boxes.append((x1, y1, x2, y2))
                     color = (80, 80, 200)
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 1)
@@ -278,6 +285,8 @@ class PhoneDetector:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                 elif cls_id == CELL_PHONE_CLASS_ID:
                     phone_candidates.append((conf, (x1, y1, x2, y2)))
+
+        self._last_person_boxes = person_boxes
 
         for conf, (x1, y1, x2, y2) in phone_candidates:
             # ROI filter
@@ -337,29 +346,33 @@ class PhoneDetector:
         now = time.time()
         detected = best_conf > 0
 
-        # --- Face visibility -------------------------------------------
-        face_visible = True  # assume visible when face detector unavailable
-        if self._face_cascade is not None:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self._face_cascade.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
-                minNeighbors=4,
-                minSize=(60, 60),
-                flags=cv2.CASCADE_SCALE_IMAGE,
-            )
-            face_visible = len(faces) > 0
-            # Draw face boxes for debug visibility
-            for (fx, fy, fw, fh) in faces:
-                cv2.rectangle(annotated, (fx, fy), (fx + fw, fy + fh), (0, 200, 0), 2)
-                cv2.putText(annotated, "Face", (fx, fy - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
+        # --- Active-use: phone overlaps with person bbox -------------------
+        # Works for overhead cameras: phone held near body is inside the person
+        # bounding box; phone lying flat on a corner of the desk is outside it.
+        # If YOLO finds no person at all (person left the room), fall back to
+        # treating any phone detection as active (safe fail).
+        face_visible = True  # kept for API compatibility; semantics: "not actively on phone"
+        if detected and best_box is not None:
+            if not person_boxes:
+                # No person detected — treat as active to be safe
+                active = True
+                face_visible = False
+            else:
+                px1, py1, px2, py2 = best_box
+                phone_area = max((px2 - px1) * (py2 - py1), 1)
+                active = False
+                for pex1, pey1, pex2, pey2 in person_boxes:
+                    ix1 = max(px1, pex1); iy1 = max(py1, pey1)
+                    ix2 = min(px2, pex2); iy2 = min(py2, pey2)
+                    if ix2 > ix1 and iy2 > iy1:
+                        overlap = (ix2 - ix1) * (iy2 - iy1) / phone_area
+                        if overlap >= PERSON_OVERLAP_THRESHOLD:
+                            active = True
+                            break
+                face_visible = not active
         else:
-            # No cascade — fall back to original behaviour (all phone detections count)
-            face_visible = False  # treat as "not visible" so existing logic fires
-
-        # Actively on phone = phone present AND user is NOT looking at the screen
-        active = detected and not face_visible
+            active = False
+            face_visible = True
 
         # --- Raw phone state ---
         if detected:
@@ -401,12 +414,13 @@ class PhoneDetector:
 
     def is_phone_persistent(self, min_duration: float = 2.0) -> bool:
         """
-        Returns True if the user has been *actively* looking at their phone
-        (phone detected + face NOT visible to camera) for at least
+        Returns True if the user has been *actively* using their phone
+        (phone bbox overlaps with the detected person body) for at least
         *min_duration* seconds.
 
-        Passive phone detections (phone lying on desk while the user's face
-        is pointing at the screen) do NOT trigger this.
+        Works for any camera angle including overhead mounts:
+        - Phone held by hand / near body → overlaps person bbox → active
+        - Phone lying flat on desk corner → outside person bbox → passive
         """
         if self._latest_result is None:
             return False

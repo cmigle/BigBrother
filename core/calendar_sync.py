@@ -214,16 +214,23 @@ class CalendarSync:
 
     def fetch_tasks(self) -> List[Dict[str, Any]]:
         """
-        Fetch incomplete Google Tasks due today or tomorrow.
-        Returns a list of task dicts with keys: id, title, due, status.
+        Fetch incomplete Google Tasks due by end of the current week (Sunday).
+        If fewer than 3 days remain in the week, extends to the following Sunday.
+        Returns a list of task dicts with keys: id, title, due, status, tasklist.
         """
         if not self._authenticated or self._tasks_service is None:
             return []
         try:
             now = datetime.now(timezone.utc)
-            day_after_tomorrow = (now + timedelta(days=2)).replace(
+
+            # Advance to the end of this Sunday; if <3 days remain, go to next Sunday
+            days_until_sunday = (6 - now.weekday()) % 7  # Monday=0 … Sunday=6
+            if days_until_sunday < 3:
+                days_until_sunday += 7  # extend to next Sunday
+            week_end = (now + timedelta(days=days_until_sunday + 1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
+
             task_lists = self._tasks_service.tasklists().list(maxResults=10).execute()
             tasks: List[Dict[str, Any]] = []
             for tl in task_lists.get("items", []):
@@ -231,8 +238,8 @@ class CalendarSync:
                 result = self._tasks_service.tasks().list(
                     tasklist=tl_id,
                     showCompleted=False,
-                    dueMax=day_after_tomorrow.isoformat(),
-                    maxResults=20,
+                    dueMax=week_end.isoformat(),
+                    maxResults=30,
                 ).execute()
                 for item in result.get("items", []):
                     if item.get("status") == "completed":
@@ -245,8 +252,10 @@ class CalendarSync:
                         "status": item.get("status", "needsAction"),
                         "tasklist": tl.get("title", ""),
                     })
+            # Sort by due date (tasks with no due date go last)
+            tasks.sort(key=lambda t: t["due"] or "9999")
             self._tasks_cache = tasks
-            logger.info("Fetched %d pending tasks", len(tasks))
+            logger.info("Fetched %d pending tasks for the week", len(tasks))
             return tasks
         except Exception as exc:
             logger.error("Failed to fetch tasks: %s", exc)

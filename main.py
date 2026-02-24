@@ -13,6 +13,7 @@ import time
 import signal
 import logging
 import threading
+import webbrowser
 from pathlib import Path
 
 import yaml
@@ -324,6 +325,11 @@ def main():
         default="config/settings.yaml",
         help="Path to settings YAML (default: config/settings.yaml).",
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not automatically open the dashboard in a browser on startup.",
+    )
     args = parser.parse_args()
 
     # ── --list-cameras ───────────────────────────────────────────────────
@@ -420,7 +426,16 @@ def main():
 
     # Start web server (blocks)
     web_cfg = config["web"]
-    logger.info("Dashboard: http://localhost:%d", web_cfg["port"])
+    url = f"http://localhost:{web_cfg['port']}"
+    logger.info("Dashboard: %s", url)
+
+    # Auto-open browser after a short delay so Flask has time to bind
+    if not args.no_browser:
+        def _open_browser():
+            time.sleep(2.0)
+            webbrowser.open(url)
+        threading.Thread(target=_open_browser, daemon=True).start()
+
     run_server(host=web_cfg["host"], port=web_cfg["port"])
 
 

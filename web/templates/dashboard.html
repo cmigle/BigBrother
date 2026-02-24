@@ -69,7 +69,7 @@
 
     <!-- Pending tasks -->
     <div class="section" id="tasks-section" style="display:none;">
-        <h2 class="section-title">Pending Tasks</h2>
+        <h2 class="section-title">This Week's Tasks</h2>
         <div id="pending-tasks" class="calendar-list"></div>
     </div>
 
@@ -238,14 +238,30 @@ function updateCalendar() {
             const tasksSec = document.getElementById('tasks-section');
             const tasksDiv = document.getElementById('pending-tasks');
             if (data.tasks && data.tasks.length > 0) {
+                // Use ISO date string comparison to avoid UTC-midnight timezone shifts
+                const todayISO = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+                const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+                const tomorrowISO = tomorrowDate.toLocaleDateString('en-CA');
+
                 let html = '';
                 data.tasks.forEach(t => {
-                    const due  = t.due ? new Date(t.due).toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'}) : '';
-                    const meta = due ? `<span class="event-time">due ${due}</span>`
-                                     : (t.tasklist ? `<span class="event-time">${t.tasklist}</span>` : '');
-                    html += `<div class="calendar-event">
+                    let dayBadge = '';
+                    let overdue  = false;
+                    if (t.due) {
+                        // Google Tasks due date: "2026-02-25T00:00:00.000Z" — extract date part
+                        const dueDateISO = t.due.substring(0, 10); // YYYY-MM-DD
+                        overdue = dueDateISO < todayISO;
+                        if (overdue)                    dayBadge = `<span class="task-day overdue">OVERDUE</span>`;
+                        else if (dueDateISO === todayISO)     dayBadge = `<span class="task-day today">TODAY</span>`;
+                        else if (dueDateISO === tomorrowISO)  dayBadge = `<span class="task-day tomorrow">TOMORROW</span>`;
+                        else {
+                            const d = new Date(dueDateISO + 'T12:00:00'); // noon local — no tz shift
+                            dayBadge = `<span class="task-day">${d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'})}</span>`;
+                        }
+                    }
+                    html += `<div class="calendar-event${overdue ? ' task-overdue' : ''}">
                         <span class="event-summary">📋 ${t.title}</span>
-                        ${meta}
+                        ${dayBadge || (t.tasklist ? `<span class="event-time">${t.tasklist}</span>` : '')}
                     </div>`;
                 });
                 tasksDiv.innerHTML = html;

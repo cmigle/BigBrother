@@ -29,14 +29,14 @@ Context:
 - Day of week: {day_of_week}
 - Current calendar event: {current_event}
 - Next upcoming event: {next_event}
-- Pending tasks: {pending_tasks}
+- Pending tasks this week: {pending_tasks}
 - Times caught today: {kill_count}
 - Time since last caught: {time_since_last}
 
 Rules:
 - Be funny and sarcastic but not mean-spirited
 - If there is a current calendar event, reference it by name
-- If there are pending tasks, mention one of them by name to shame the user
+- If there are pending tasks, mention one of them by name (and when it's due) to shame the user
 - If NO event is currently scheduled (event says "Nothing scheduled"), make an EDUCATED GUESS about what they should be doing based on the time and day — e.g. if it's evening on a weekday guess they have assignments/studying, if it's morning guess they have work/classes, if it's late guess they should sleep. Be specific and creative with the guess.
 - If they've been caught many times today, roast them harder
 - Keep it under 3 sentences
@@ -326,15 +326,38 @@ class AICoach:
         return "Nothing coming up"
 
     def _get_pending_tasks_text(self) -> str:
-        """Return a short summary of pending Google Tasks (today + tomorrow)."""
+        """Return a short summary of pending Google Tasks for this week."""
         if self.calendar is None:
             return "No tasks"
         try:
             tasks = self.calendar.get_tasks()
             if not tasks:
-                return "No pending tasks"
-            names = [t.get("title", "Untitled task") for t in tasks[:3]]
-            summary = ", ".join(names)
+                return "No pending tasks this week"
+            # Format up to 3 tasks with due-day hint
+            parts = []
+            now_date = datetime.now().date()
+            for t in tasks[:3]:
+                name = t.get("title", "Untitled task")
+                due_str = t.get("due", "")
+                if due_str:
+                    try:
+                        # Google Tasks due dates are RFC 3339 (UTC midnight)
+                        due_dt = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
+                        diff = (due_dt.date() - now_date).days
+                        if diff < 0:
+                            day_label = "overdue"
+                        elif diff == 0:
+                            day_label = "today"
+                        elif diff == 1:
+                            day_label = "tomorrow"
+                        else:
+                            day_label = due_dt.strftime("%A")  # Monday, Tuesday…
+                        parts.append(f"{name} (due {day_label})")
+                    except Exception:
+                        parts.append(name)
+                else:
+                    parts.append(name)
+            summary = ", ".join(parts)
             if len(tasks) > 3:
                 summary += f" (+{len(tasks) - 3} more)"
             return summary
