@@ -8,8 +8,9 @@ a phone has been visible for a configurable duration.
 
 import time
 import logging
+import collections
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -18,14 +19,6 @@ logger = logging.getLogger(__name__)
 
 # COCO class ID for cell phone
 CELL_PHONE_CLASS_ID = 67
-
-# COCO class ID for person
-PERSON_CLASS_ID = 0
-
-# Minimum fraction of phone bbox that must overlap a person bbox
-# for the phone to be considered held/actively used.
-# Overhead cameras: person body fills a region; phone held by hand is inside it.
-PERSON_OVERLAP_THRESHOLD = 0.25
 
 # COCO class IDs that represent screens / flat devices (suppress phone if overlapping)
 SCREEN_CLASS_IDS = [62, 63]  # 62=tv/monitor, 63=laptop (covers iPads sometimes)
@@ -96,19 +89,32 @@ class PhoneDetector:
         self.screen_overlap_threshold = screen_overlap_threshold
         self.max_phone_area_fraction = max_phone_area_fraction
 
-        # Active-use detection strategy: check whether the phone bounding box
-        # overlaps significantly with a detected person (COCO class 0).
-        # This works for ANY camera angle, including overhead mounts:
-        #   - Phone held in hand/near body → inside person bbox → active
-        #   - Phone lying on desk corner  → outside person bbox → passive
-        # No extra models needed — person detection runs in the same YOLO pass.
+        # ── Motion-based active-use detection ────────────────────────────
+        # Strategy: track the phone's centroid (cx, cy) over a rolling time
+        # window. A phone lying still on the desk barely moves; a phone being
+        # picked up and held moves noticeably.
+        #
+        # Works for ANY camera angle — front, side, overhead — because it
+        # relies purely on bbox movement, not spatial overlap or face direction.
+        #
+        # _motion_window   : seconds of history to look back (default 2.5 s)
+        # _motion_threshold: pixels of total displacement that constitutes
+        #                    "movement" (default 35 px; tune up/down)
+        # _motion_grace    : seconds after first detection treated as active
+        #                    so we catch the pick-up moment before the phone
+        #                    has had time to become "stationary"
+        self._motion_window: float = 2.5
+        self._motion_threshold: float = 35.0
+        self._motion_grace: float = 2.0
+        # Rolling buffer of (timestamp, cx, cy)
+        self._centroid_history: Deque[Tuple[float, float, float]] = collections.deque()
+        self._phone_first_seen: Optional[float] = None  # time phone first appeared
 
         self._detection_start: Optional[float] = None
-        self._phone_detected: bool = False   # raw phone visible
+        self._phone_detected: bool = False
         self._active_start: Optional[float] = None
-        self._actively_on_phone: bool = False  # phone visible + overlaps person
-        # Last known person bboxes (for debug / UI)
-        self._last_person_boxes: List[Tuple[int, int, int, int]] = []
+        self._actively_on_phone: bool = False
+        self._last_person_boxes: List[Tuple[int, int, int, int]] = []  # kept for compat
         self._latest_result: Optional[PhoneDetectionResult] = None
         self._latest_frame: Optional[np.ndarray] = None
         self._cap: Optional[cv2.VideoCapture] = None
@@ -243,8 +249,8 @@ class PhoneDetector:
         """
         result = PhoneDetectionResult()
 
-        # Detect phones, screen classes, AND persons in one pass
-        detect_classes = [PERSON_CLASS_ID, CELL_PHONE_CLASS_ID] + (SCREEN_CLASS_IDS if self.filter_screens else [])
+        # Detect phones and screen classes in one pass
+        detect_classes = [CELL_PHONE_CLASS_ID] + (SCREEN_CLASS_IDS if self.filter_screens else [])
         preds = self.model.predict(
             frame,
             classes=detect_classes,
@@ -259,9 +265,7 @@ class PhoneDetector:
         best_conf = 0.0
         best_box = None
 
-        # Collect all box types in one pass
         screen_boxes: List[Tuple[int, int, int, int]] = []
-        person_boxes: List[Tuple[int, int, int, int]] = []
         phone_candidates: List[Tuple[float, Tuple[int, int, int, int]]] = []
 
         for det in preds:
@@ -272,12 +276,7 @@ class PhoneDetector:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                if cls_id == PERSON_CLASS_ID:
-                    person_boxes.append((x1, y1, x2, y2))
-                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 0), 1)
-                    cv2.putText(annotated, f"Person {conf:.2f}", (x1, y1 - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 0), 1)
-                elif cls_id in SCREEN_CLASS_IDS:
+                if cls_id in SCREEN_CLASS_IDS:
                     screen_boxes.append((x1, y1, x2, y2))
                     color = (80, 80, 200)
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 1)
@@ -285,8 +284,6 @@ class PhoneDetector:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                 elif cls_id == CELL_PHONE_CLASS_ID:
                     phone_candidates.append((conf, (x1, y1, x2, y2)))
-
-        self._last_person_boxes = person_boxes
 
         for conf, (x1, y1, x2, y2) in phone_candidates:
             # ROI filter
@@ -346,33 +343,53 @@ class PhoneDetector:
         now = time.time()
         detected = best_conf > 0
 
-        # --- Active-use: phone overlaps with person bbox -------------------
-        # Works for overhead cameras: phone held near body is inside the person
-        # bounding box; phone lying flat on a corner of the desk is outside it.
-        # If YOLO finds no person at all (person left the room), fall back to
-        # treating any phone detection as active (safe fail).
-        face_visible = True  # kept for API compatibility; semantics: "not actively on phone"
+        # ── Motion-based active-use detection ────────────────────────────
+        # Track the phone centroid over time. Stationary = on desk (passive).
+        # Moving = being held (active).
+        face_visible = True  # kept for API compatibility
+        active = False
+
         if detected and best_box is not None:
-            if not person_boxes:
-                # No person detected — treat as active to be safe
+            cx = (best_box[0] + best_box[2]) / 2.0
+            cy = (best_box[1] + best_box[3]) / 2.0
+
+            # Record first-seen time
+            if self._phone_first_seen is None:
+                self._phone_first_seen = now
+
+            # Append to rolling centroid history
+            self._centroid_history.append((now, cx, cy))
+
+            # Purge entries older than the motion window
+            cutoff = now - self._motion_window
+            while self._centroid_history and self._centroid_history[0][0] < cutoff:
+                self._centroid_history.popleft()
+
+            # Grace period: treat first appearance as active so the pick-up
+            # moment (before the phone has settled) always fires.
+            in_grace = (now - self._phone_first_seen) < self._motion_grace
+
+            if in_grace:
                 active = True
-                face_visible = False
-            else:
-                px1, py1, px2, py2 = best_box
-                phone_area = max((px2 - px1) * (py2 - py1), 1)
-                active = False
-                for pex1, pey1, pex2, pey2 in person_boxes:
-                    ix1 = max(px1, pex1); iy1 = max(py1, pey1)
-                    ix2 = min(px2, pex2); iy2 = min(py2, pey2)
-                    if ix2 > ix1 and iy2 > iy1:
-                        overlap = (ix2 - ix1) * (iy2 - iy1) / phone_area
-                        if overlap >= PERSON_OVERLAP_THRESHOLD:
-                            active = True
-                            break
-                face_visible = not active
+            elif len(self._centroid_history) >= 2:
+                # Compute max displacement across the history window
+                xs = [e[1] for e in self._centroid_history]
+                ys = [e[2] for e in self._centroid_history]
+                displacement = ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) ** 0.5
+                active = displacement >= self._motion_threshold
+            # else: too few samples yet — stay passive
+
+            face_visible = not active
+
+            # Draw motion indicator on feed
+            status_color = (0, 80, 255) if active else (0, 180, 0)
+            status_text  = "HELD" if active else "on desk"
+            cv2.putText(annotated, status_text, (best_box[0], best_box[3] + 18),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 2)
         else:
-            active = False
-            face_visible = True
+            # Phone gone — reset tracking
+            self._centroid_history.clear()
+            self._phone_first_seen = None
 
         # --- Raw phone state ---
         if detected:
@@ -414,13 +431,15 @@ class PhoneDetector:
 
     def is_phone_persistent(self, min_duration: float = 2.0) -> bool:
         """
-        Returns True if the user has been *actively* using their phone
-        (phone bbox overlaps with the detected person body) for at least
+        Returns True if the phone has been actively held/used for at least
         *min_duration* seconds.
 
-        Works for any camera angle including overhead mounts:
-        - Phone held by hand / near body → overlaps person bbox → active
-        - Phone lying flat on desk corner → outside person bbox → passive
+        Active = the phone's centroid has moved more than _motion_threshold
+        pixels within the last _motion_window seconds, OR the phone just
+        appeared (grace period — catches the pick-up moment).
+
+        Works for any camera angle — front, side, or overhead — because it
+        relies purely on bbox movement, not face direction or spatial overlap.
         """
         if self._latest_result is None:
             return False
@@ -444,6 +463,8 @@ class PhoneDetector:
         filter_screens: Optional[bool] = None,
         screen_overlap_threshold: Optional[float] = None,
         max_phone_area_fraction: Optional[float] = None,
+        motion_threshold: Optional[float] = None,
+        motion_window: Optional[float] = None,
     ):
         """Hot-update detection settings without recreating the detector."""
         if confidence is not None:
@@ -459,3 +480,9 @@ class PhoneDetector:
             self.screen_overlap_threshold = screen_overlap_threshold
         if max_phone_area_fraction is not None:
             self.max_phone_area_fraction = max_phone_area_fraction
+        if motion_threshold is not None:
+            self._motion_threshold = motion_threshold
+            logger.info("motion_threshold updated to %.1f px", motion_threshold)
+        if motion_window is not None:
+            self._motion_window = motion_window
+            logger.info("motion_window updated to %.1f s", motion_window)

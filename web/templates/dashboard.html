@@ -73,6 +73,12 @@
         <div id="pending-tasks" class="calendar-list"></div>
     </div>
 
+    <!-- Week plan -->
+    <div class="section" id="week-plan-section" style="display:none;">
+        <h2 class="section-title">This Week</h2>
+        <div id="week-plan-days"></div>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -309,6 +315,54 @@ function completeTask(eventId, checkbox) {
     });
 }
 
+// ── Week Plan ────────────────────────────────────────────────────────
+function updateWeekPlan() {
+    fetch('/api/weekly-plan')
+        .then(r => r.json())
+        .then(data => {
+            const section = document.getElementById('week-plan-section');
+            const container = document.getElementById('week-plan-days');
+            if (!data.authenticated || !data.days || data.days.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            let html = '';
+            data.days.forEach(day => {
+                const hasContent = (day.events && day.events.length > 0) ||
+                                   (day.tasks  && day.tasks.length  > 0);
+                if (!hasContent) return;
+                const isToday = day.label === 'Today';
+                html += `<div class="week-day-card${isToday ? ' week-day-today' : ''}">
+                    <div class="week-day-header">${day.label}</div>`;
+                if (day.events && day.events.length > 0) {
+                    day.events.forEach(ev => {
+                        const start = ev.start ? new Date(ev.start) : null;
+                        const end   = ev.end   ? new Date(ev.end)   : null;
+                        const startStr = start ? start.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+                        const endStr   = end   ? end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})   : '';
+                        html += `<div class="week-day-event">
+                            <span class="week-event-time">${startStr}${endStr ? '–'+endStr : ''}</span>
+                            <span class="week-event-name">${ev.summary}</span>
+                        </div>`;
+                    });
+                }
+                if (day.tasks && day.tasks.length > 0) {
+                    day.tasks.forEach(t => {
+                        html += `<div class="week-day-task">📋 ${t.title}</div>`;
+                    });
+                }
+                html += `</div>`;
+            });
+            if (html) {
+                container.innerHTML = `<div class="week-plan-grid">${html}</div>`;
+                section.style.display = '';
+            } else {
+                section.style.display = 'none';
+            }
+        })
+        .catch(err => console.error('Week plan fetch error:', err));
+}
+
 // ── Init ─────────────────────────────────────────────────────────────
 // Load voices (Chrome needs a user gesture or slight delay)
 if (synth && synth.onvoiceschanged !== undefined) synth.onvoiceschanged = () => {};
@@ -317,5 +371,7 @@ setInterval(updateDashboard, 2000);
 updateDashboard();
 updateCalendar();
 setInterval(updateCalendar, 60000);
+updateWeekPlan();
+setInterval(updateWeekPlan, 300000);
 </script>
 {% endblock %}

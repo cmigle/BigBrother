@@ -701,3 +701,52 @@ a:hover { opacity: 0.75; text-decoration: underline; }
 
 
 
+
+/* ================================================================
+   Week Plan
+   ================================================================ */
+.week-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 0.75rem;
+}
+.week-day-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    transition: border-color var(--transition);
+}
+.week-day-card:hover { border-color: var(--border-mid); }
+.week-day-card.week-day-today {
+    border-color: rgba(0,229,255,0.35);
+    background: rgba(0,229,255,0.04);
+}
+.week-day-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    margin-bottom: 0.6rem;
+    opacity: 0.85;
+}
+.week-day-card.week-day-today .week-day-header { opacity: 1; }
+.week-day-event {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.78rem;
+    color: var(--text);
+}
+.week-event-time { font-size: 0.68rem; color: var(--muted); letter-spacing: 0.04em; }
+.week-event-name { line-height: 1.3; }
+.week-day-task {
+    font-size: 0.76rem;
+    color: var(--muted);
+    padding: 0.2rem 0;
+    border-top: 1px solid var(--border-dim);
+    margin-top: 0.25rem;
+}

@@ -165,6 +165,15 @@ def api_calendar():
     })
 
 
+@app.route("/api/weekly-plan")
+def api_weekly_plan():
+    """Day-by-day plan for the rest of the week (events + tasks grouped by day)."""
+    if _calendar is None or not _calendar.is_authenticated:
+        return jsonify({"days": [], "authenticated": False})
+    days = _calendar.get_week_plan()
+    return jsonify({"days": days, "authenticated": True})
+
+
 @app.route("/api/calendar/complete", methods=["POST"])
 def api_calendar_complete():
     """Mark a calendar event as completed."""

@@ -283,6 +283,100 @@ class CalendarSync:
         self._maybe_refresh()
         return self._tasks_cache
 
+    def get_week_plan(self) -> List[Dict[str, Any]]:
+        """
+        Return a day-by-day plan for the rest of the week (today → Sunday).
+        Each entry: { date, label, events, tasks }
+        """
+        self._maybe_refresh()
+
+        now = datetime.now(timezone.utc)
+        today = now.date()
+
+        # How many days until Sunday (0 = today is Sunday → show current week only)
+        days_until_sunday = (6 - today.weekday()) % 7
+        if days_until_sunday == 0:
+            days_until_sunday = 6  # Sunday → show the next 6 days
+
+        days: List[Dict[str, Any]] = []
+
+        for offset in range(days_until_sunday + 1):
+            target_date = today + timedelta(days=offset)
+            date_str = target_date.isoformat()  # "2026-02-24"
+
+            # Label
+            if offset == 0:
+                label = "Today"
+            elif offset == 1:
+                label = "Tomorrow"
+            else:
+                label = target_date.strftime("%A")  # Monday, Tuesday…
+
+            # Events for this day
+            if offset == 0:
+                day_events = [
+                    {"summary": e.get("summary", ""), "start": e.get("start", ""),
+                     "end": e.get("end", ""), "id": e.get("id", "")}
+                    for e in self._events_cache
+                ]
+            elif offset == 1:
+                day_events = [
+                    {"summary": e.get("summary", ""), "start": e.get("start", ""),
+                     "end": e.get("end", ""), "id": e.get("id", "")}
+                    for e in self._tomorrow_cache
+                ]
+            else:
+                # Fetch on demand (will be cached by fetch_events → but we don't
+                # persist further-out days — do a live fetch for this week view)
+                day_events = []
+                if self._authenticated and self._service is not None:
+                    try:
+                        target_dt = datetime(target_date.year, target_date.month,
+                                             target_date.day, tzinfo=timezone.utc)
+                        start = target_dt
+                        end   = target_dt + timedelta(days=1)
+                        result = self._service.events().list(
+                            calendarId=self.calendar_id,
+                            timeMin=start.isoformat(),
+                            timeMax=end.isoformat(),
+                            singleEvents=True,
+                            orderBy="startTime",
+                        ).execute()
+                        day_events = [
+                            {"summary": e.get("summary", ""),
+                             "start": e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
+                             "end":   e.get("end",   {}).get("dateTime", e.get("end",   {}).get("date", "")),
+                             "id":    e.get("id", "")}
+                            for e in result.get("items", [])
+                        ]
+                    except Exception as exc:
+                        logger.warning("Could not fetch events for %s: %s", date_str, exc)
+
+            # Tasks due on this day
+            day_tasks = [
+                {"title": t.get("title", ""), "id": t.get("id", ""),
+                 "due": t.get("due", ""), "tasklist": t.get("tasklist", "")}
+                for t in self._tasks_cache
+                if t.get("due", "")[:10] == date_str
+            ]
+            # Also include tasks with no due date on the "Today" bucket
+            if offset == 0:
+                day_tasks += [
+                    {"title": t.get("title", ""), "id": t.get("id", ""),
+                     "due": "", "tasklist": t.get("tasklist", "")}
+                    for t in self._tasks_cache
+                    if not t.get("due")
+                ]
+
+            days.append({
+                "date":   date_str,
+                "label":  label,
+                "events": day_events,
+                "tasks":  day_tasks,
+            })
+
+        return days
+
     def get_current_event(self) -> Optional[Dict[str, Any]]:
         """Get the event happening right now, if any."""
         self._maybe_refresh()
