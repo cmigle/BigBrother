@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="stats-page">
-    <h1 class="page-title">&#128200; Kill Stats</h1>
+    <h1 class="page-title">Kill Stats</h1>
 
     <!-- Summary cards -->
     <div class="stats-row">
@@ -90,8 +90,8 @@ function loadStats() {
                         datasets: [{
                             label: 'Kills',
                             data: values,
-                            backgroundColor: '#ff4444',
-                            borderColor: '#cc0000',
+                            backgroundColor: 'rgba(255,45,45,0.7)',
+                            borderColor: 'var(--red)',
                             borderWidth: 1,
                         }],
                     },
@@ -99,8 +99,8 @@ function loadStats() {
                         responsive: true,
                         plugins: { legend: { display: false } },
                         scales: {
-                            y: { beginAtZero: true, ticks: { color: '#aaa' }, grid: { color: '#333' } },
-                            x: { ticks: { color: '#aaa' }, grid: { color: '#333' } },
+                            y: { beginAtZero: true, ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
+                            x: { ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
                         },
                     },
                 });
@@ -123,8 +123,8 @@ function loadStats() {
                         datasets: [{
                             label: 'Kills',
                             data: hourValues,
-                            backgroundColor: '#ff8800',
-                            borderColor: '#cc6600',
+                            backgroundColor: 'rgba(255,119,0,0.7)',
+                            borderColor: 'var(--orange)',
                             borderWidth: 1,
                         }],
                     },
@@ -132,8 +132,8 @@ function loadStats() {
                         responsive: true,
                         plugins: { legend: { display: false } },
                         scales: {
-                            y: { beginAtZero: true, ticks: { color: '#aaa' }, grid: { color: '#333' } },
-                            x: { ticks: { color: '#aaa', maxRotation: 45 }, grid: { color: '#333' } },
+                            y: { beginAtZero: true, ticks: { color: '#4a7a4a' }, grid: { color: '#1a2e1a' } },
+                            x: { ticks: { color: '#4a7a4a', maxRotation: 45 }, grid: { color: '#1a2e1a' } },
                         },
                     },
                 });

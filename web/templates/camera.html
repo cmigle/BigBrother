@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="camera-page">
-    <h1 class="page-title">&#128247; Live Camera Feed</h1>
+    <h1 class="page-title">Live Camera Feed</h1>
 
     <div class="camera-container">
         <img id="camera-feed" src="/api/camera/feed" alt="Camera Feed" class="camera-feed">
@@ -56,13 +56,13 @@ function updateCameraStatus() {
                 overlay.className = 'camera-overlay danger';
                 label.textContent = 'PHONE DETECTED';
                 status.textContent = 'DETECTED';
-                status.style.color = '#ff4444';
+                status.style.color = 'var(--red)';
                 conf.textContent = (data.confidence * 100).toFixed(1) + '%';
             } else {
                 overlay.className = 'camera-overlay';
                 label.textContent = 'MONITORING';
                 status.textContent = 'Clear';
-                status.style.color = '#44ff44';
+                status.style.color = 'var(--green)';
                 conf.textContent = '—';
             }
         })

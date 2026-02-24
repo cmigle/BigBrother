@@ -26,6 +26,7 @@ Now deliver a short (2-3 sentences max), funny, biting roast telling them what t
 
 Context:
 - Current time: {current_time}
+- Day of week: {day_of_week}
 - Current calendar event: {current_event}
 - Next upcoming event: {next_event}
 - Times caught today: {kill_count}
@@ -33,10 +34,31 @@ Context:
 
 Rules:
 - Be funny and sarcastic but not mean-spirited
-- Reference their actual calendar event by name
+- If there is a current calendar event, reference it by name
+- If NO event is currently scheduled (event says "Nothing scheduled"), make an EDUCATED GUESS about what they should be doing based on the time and day — e.g. if it's evening on a weekday guess they have assignments/studying, if it's morning guess they have work/classes, if it's late guess they should sleep. Be specific and creative with the guess.
 - If they've been caught many times today, roast them harder
 - Keep it under 3 sentences
 - Start with a reaction to the gunshot (e.g., "BANG!", "Another one!", "Again?!")
+"""
+
+GUESS_PROMPT = """You are a brutally honest but funny productivity coach.
+The user has no calendar events scheduled right now.
+Based on the context below, make a SHORT (1-2 sentences) educated guess about what they SHOULD be doing right now instead of checking their phone.
+
+Context:
+- Current time: {current_time}
+- Day of week: {day_of_week}
+- Time of day: {time_of_day}
+- Next upcoming event: {next_event}
+- Times caught today: {kill_count}
+
+Make a realistic, specific guess. Examples:
+- Sunday evening → "probably have a week's worth of assignments due tomorrow"
+- Monday morning → "should be preparing for the week / morning standup"
+- Late night → "should be sleeping, not doomscrolling"
+- Weekday afternoon → "should be working on whatever deadline is creeping up"
+
+Be direct, funny, and specific. Just output the guess, no preamble.
 """
 
 
@@ -66,6 +88,7 @@ class AICoach:
         self.tts_enabled = tts_enabled
         self.tts_engine = tts_engine
         self.last_roast: str = ""
+        self.last_guess: str = ""
         self.roast_history_path = Path(roast_history_path)
 
         self._fallback_roasts: List[str] = []
@@ -106,14 +129,16 @@ class AICoach:
         Tries Ollama first, falls back to template roasts.
         """
         # Gather context
+        now = datetime.now()
         current_event = self._get_current_event_text()
         next_event = self._get_next_event_text()
         kill_count = self.stats.get_today_stats().get("kill_count", 0)
         time_since = self._format_time_since_last()
-        current_time = datetime.now().strftime("%I:%M %p")
+        current_time = now.strftime("%I:%M %p")
+        day_of_week = now.strftime("%A")
 
         # Try Ollama
-        roast = self._try_ollama(current_time, current_event, next_event, kill_count, time_since)
+        roast = self._try_ollama(current_time, day_of_week, current_event, next_event, kill_count, time_since)
 
         # Fallback
         if roast is None:
@@ -128,12 +153,13 @@ class AICoach:
         return roast
 
     def _try_ollama(
-        self, current_time: str, current_event: str, next_event: str,
+        self, current_time: str, day_of_week: str, current_event: str, next_event: str,
         kill_count: int, time_since: str,
     ) -> Optional[str]:
         """Attempt to generate a roast via Ollama. Returns None on failure."""
         prompt = DRILL_SERGEANT_PROMPT.format(
             current_time=current_time,
+            day_of_week=day_of_week,
             current_event=current_event,
             next_event=next_event,
             kill_count=kill_count,
@@ -188,6 +214,90 @@ class AICoach:
             kill_count=kill_count,
             minutes_until=minutes_until,
         )
+
+    # ------------------------------------------------------------------
+    # Educated guess (no calendar event)
+    # ------------------------------------------------------------------
+
+    def generate_guess(self) -> str:
+        """
+        When no calendar event is active, generate an educated guess about
+        what the user should be doing based on the time and day of week.
+        Uses Ollama if available, otherwise returns a hardcoded time-aware fallback.
+        """
+        now = datetime.now()
+        hour = now.hour
+        current_time = now.strftime("%I:%M %p")
+        day_of_week = now.strftime("%A")
+        next_event = self._get_next_event_text()
+        kill_count = self.stats.get_today_stats().get("kill_count", 0)
+
+        if hour < 6:
+            time_of_day = "middle of the night"
+        elif hour < 9:
+            time_of_day = "early morning"
+        elif hour < 12:
+            time_of_day = "morning"
+        elif hour < 14:
+            time_of_day = "midday"
+        elif hour < 17:
+            time_of_day = "afternoon"
+        elif hour < 20:
+            time_of_day = "evening"
+        else:
+            time_of_day = "late night"
+
+        # Try Ollama
+        try:
+            prompt = GUESS_PROMPT.format(
+                current_time=current_time,
+                day_of_week=day_of_week,
+                time_of_day=time_of_day,
+                next_event=next_event,
+                kill_count=kill_count,
+            )
+            resp = requests.post(
+                f"{self.url}/api/generate",
+                json={"model": self.model, "prompt": prompt, "stream": False},
+                timeout=8,
+            )
+            resp.raise_for_status()
+            guess = resp.json().get("response", "").strip()
+            if guess:
+                self.last_guess = guess
+                return guess
+        except Exception:
+            pass
+
+        # Hardcoded time-aware fallbacks
+        is_weekend = day_of_week in ("Saturday", "Sunday")
+        if hour < 6:
+            guess = "It's the dead of night. Put the phone down and sleep, you absolute goblin."
+        elif hour < 9:
+            guess = f"It's {current_time} on a {day_of_week} morning. Prep for the day instead of rotting in bed."
+        elif 9 <= hour < 12 and not is_weekend:
+            guess = f"It's {current_time} — a weekday morning. You have work or classes, don't you?"
+        elif 12 <= hour < 14:
+            guess = "Lunch break is for eating, not doomscrolling. Chew your food."
+        elif 14 <= hour < 17 and not is_weekend:
+            guess = "Mid-afternoon on a weekday — you've got deadlines lurking. Get back to it."
+        elif 17 <= hour < 20 and not is_weekend:
+            guess = f"{day_of_week} evening. You probably have assignments due tomorrow you haven't started."
+        elif hour >= 20:
+            guess = "It's late. Either finish your work or go to sleep. There's no third option."
+        elif is_weekend and hour < 12:
+            guess = "Weekend morning — great time to get ahead on the week. You won't though, will you."
+        else:
+            guess = f"You could be doing literally anything productive right now. It's {current_time} on {day_of_week}."
+
+        self.last_guess = guess
+        return guess
+
+    def get_guess(self) -> str:
+        """Return the last generated guess, or generate a fresh one."""
+        if not self.last_guess:
+            return self.generate_guess()
+        return self.last_guess
 
     # ------------------------------------------------------------------
     # Calendar helpers

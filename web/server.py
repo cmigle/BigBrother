@@ -96,6 +96,7 @@ def api_status():
             on_cooldown = _scare.is_on_cooldown()
 
         latest_roast = _coach.get_latest_roast() if _coach else ""
+        latest_guess = _coach.get_guess() if _coach else ""
 
     return jsonify({
         "phone_detected": phone_detected,
@@ -104,6 +105,7 @@ def api_status():
         "kill_count_today": today.get("kill_count", 0),
         "current_streak": round(streak, 1),
         "latest_roast": latest_roast,
+        "latest_guess": latest_guess,
     })
 
 
@@ -162,6 +164,32 @@ def api_roast_history():
     """All roasts with timestamps."""
     history = _coach.get_roast_history() if _coach else []
     return jsonify({"history": history})
+
+
+@app.route("/api/roast/speak", methods=["POST"])
+def api_roast_speak():
+    """Trigger server-side TTS for the latest roast."""
+    if _coach is None:
+        return jsonify({"error": "Coach not available"}), 503
+    roast = _coach.get_latest_roast()
+    if not roast:
+        return jsonify({"error": "No roast to speak"}), 404
+    threading.Thread(target=_coach.speak, args=(roast,), daemon=True).start()
+    return jsonify({"success": True, "roast": roast})
+
+
+@app.route("/api/guess")
+def api_guess():
+    """Educated guess about what the user should be doing (no calendar event)."""
+    if _coach is None:
+        return jsonify({"guess": "You should be working. Obviously."}), 200
+    # Check if there's a current event — only generate guess if nothing scheduled
+    has_event = False
+    if _calendar and _calendar.is_authenticated:
+        ev = _calendar.get_current_event()
+        has_event = ev is not None
+    guess = _coach.generate_guess() if not has_event else ""
+    return jsonify({"guess": guess, "has_current_event": has_event})
 
 
 @app.route("/api/settings", methods=["GET", "POST"])
