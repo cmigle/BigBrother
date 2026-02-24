@@ -144,7 +144,7 @@ class AICoach:
         roast = self._try_ollama(current_time, day_of_week, current_event, next_event, pending_tasks, kill_count, time_since)
 
         if roast is None:
-            roast = self._fallback_roast(current_event, next_event, kill_count)
+            roast = self._fallback_roast(current_event, next_event, kill_count, pending_tasks)
 
         self.last_roast = roast
         self._last_roast_time = time.time()
@@ -194,8 +194,34 @@ class AICoach:
 
         return None
 
-    def _fallback_roast(self, current_event: str, next_event: str, kill_count: int) -> str:
+    def _fallback_roast(self, current_event: str, next_event: str, kill_count: int, pending_tasks: str = "") -> str:
         """Pick a random template roast and fill in placeholders."""
+        # When nothing is currently scheduled, substitute a task name or
+        # a time-aware activity so the roast doesn't read "Nothing scheduled
+        # right now' needs you" verbatim.
+        event_substitute = current_event
+        if current_event == "Nothing scheduled right now":
+            if pending_tasks and pending_tasks not in ("No pending tasks this week", "No tasks"):
+                # e.g. "Finish report (due today), Review PR (due tomorrow)"
+                first_task = pending_tasks.split(",")[0].strip()
+                if " (due " in first_task:
+                    first_task = first_task[:first_task.index(" (due ")]
+                event_substitute = first_task
+            else:
+                hour = datetime.now().hour
+                if hour < 9:
+                    event_substitute = "morning prep"
+                elif hour < 12:
+                    event_substitute = "your morning work"
+                elif hour < 14:
+                    event_substitute = "your afternoon grind"
+                elif hour < 17:
+                    event_substitute = "whatever deadline you're dodging"
+                elif hour < 20:
+                    event_substitute = "your evening to-do list"
+                else:
+                    event_substitute = "sleep (yes, sleep)"
+
         template = random.choice(self._fallback_roasts)
 
         # Compute minutes until next event (rough)
@@ -212,7 +238,7 @@ class AICoach:
                     pass
 
         return template.format(
-            event=current_event,
+            event=event_substitute,
             next_event=next_event,
             kill_count=kill_count,
             minutes_until=minutes_until,
