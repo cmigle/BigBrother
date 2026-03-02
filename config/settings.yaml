@@ -46,6 +46,11 @@ hardware:
   serial_enabled: false
   serial_port: "COM3"
   baud_rate: 9600
+  # WiFi trigger — set wifi_enabled: true and point arduino_url at the ESP32's IP.
+  # The server must be running and reachable on the same network.
+  # Example: arduino_url: "http://192.168.1.42"
+  wifi_enabled: true
+  arduino_url: "http://192.168.1.101"
 
 calendar:
   enabled: true

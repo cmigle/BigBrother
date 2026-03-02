@@ -68,6 +68,8 @@ DEFAULT_CONFIG = {
         "serial_enabled": False,
         "serial_port": "COM3",
         "baud_rate": 9600,
+        "wifi_enabled": False,
+        "arduino_url": "http://192.168.1.100",
     },
     "calendar": {
         "enabled": True,
@@ -159,12 +161,14 @@ def init_modules(config: dict):
         except Exception as exc:
             logger.warning("Calendar auth failed: %s — continuing without calendar", exc)
 
-    # Serial gun (optional)
+    # Serial / WiFi gun (optional)
     hw_cfg = config["hardware"]
     serial_gun = SerialGun(
         port=hw_cfg["serial_port"],
         baud_rate=hw_cfg["baud_rate"],
         enabled=hw_cfg["serial_enabled"],
+        wifi_enabled=hw_cfg.get("wifi_enabled", False),
+        arduino_url=hw_cfg.get("arduino_url", "http://192.168.1.100"),
     )
 
     # AI Coach
@@ -187,7 +191,7 @@ def init_modules(config: dict):
         sound_folder=sc_cfg["sound_folder"],
         cooldown=sc_cfg["cooldown_seconds"],
         volume=sc_cfg["volume"],
-        serial_gun=serial_gun if hw_cfg["serial_enabled"] else None,
+        serial_gun=serial_gun if (hw_cfg["serial_enabled"] or hw_cfg.get("wifi_enabled", False)) else None,
         escalation_enabled=sc_cfg["escalation_enabled"],
         escalation_delay=sc_cfg["escalation_delay"],
     )
