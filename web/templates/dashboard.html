@@ -21,34 +21,34 @@
 
     <!-- Status banner -->
     <div id="status-banner" class="status-banner status-clear">
-        <div class="status-icon" id="status-icon">👁</div>
-        <div class="status-text typewriter-cursor" id="status-text">ALL CLEAR</div>
+        <span class="status-dot" id="status-dot"></span>
+        <div class="status-text" id="status-text">All clear</div>
         <div class="status-confidence" id="status-confidence"></div>
     </div>
 
     <!-- Process / browser-tab distraction warning -->
     <div id="distraction-card" class="distraction-card" style="display:none;">
         <div class="distraction-label">
-            <span id="distraction-source-icon">🖥️</span>
-            <span id="distraction-label-text">DISTRACTION DETECTED</span>
+            <span class="distraction-source-tag" id="distraction-source-icon">APP</span>
+            <span id="distraction-label-text">Distraction detected</span>
             <span class="distraction-duration" id="distraction-duration"></span>
         </div>
         <div class="distraction-app" id="distraction-app"></div>
-        <div class="distraction-hint">Close it. Now. Eyes on the work.</div>
+        <div class="distraction-hint">Close it. Eyes on the work.</div>
     </div>
 
     <!-- AI Coach roast -->
     <div class="roast-card" id="roast-card" style="display:none;">
         <div class="roast-label">
-            <span>💥 DRILL SERGEANT</span>
-            <button class="btn-speak" id="speak-btn" onclick="speakRoastManual()">▶ SPEAK</button>
+            <span>Drill Sergeant</span>
+            <button class="btn-speak" id="speak-btn" onclick="speakRoastManual()">Speak</button>
         </div>
-        <div class="roast-text typewriter-cursor" id="roast-text"></div>
+        <div class="roast-text" id="roast-text"></div>
     </div>
 
     <!-- Educated-guess card (shown when no calendar event) -->
     <div class="guess-card" id="guess-card">
-        <div class="guess-label">⚡ AI ANALYSIS — WHAT YOU SHOULD BE DOING</div>
+        <div class="guess-label">Recommended focus</div>
         <div class="guess-text" id="guess-text"></div>
     </div>
 
@@ -152,33 +152,28 @@ function updateDashboard() {
             const banner = document.getElementById('status-banner');
             const text   = document.getElementById('status-text');
             const conf   = document.getElementById('status-confidence');
-            const icon   = document.getElementById('status-icon');
-
+            // Status dot + banner colour driven by class only — no glyphs.
             if (data.phone_detected) {
                 if (data.actively_on_phone) {
                     banner.className = 'status-banner status-danger';
-                    text.textContent = 'PHONE ACTIVE — FIRING!';
-                    conf.textContent = 'CONFIDENCE: ' + (data.confidence * 100).toFixed(1) + '%';
-                    icon.textContent = '⊗';
+                    text.textContent = 'Phone active';
+                    conf.textContent = (data.confidence * 100).toFixed(1) + '% confidence';
                 } else {
-                    // Phone detected but user is looking at screen — passive
                     banner.className = 'status-banner status-warning';
-                    text.textContent = 'PHONE ON TABLE — passive';
-                    conf.textContent = 'Face on screen ✓';
-                    icon.textContent = '📵';
+                    text.textContent = 'Phone on table';
+                    conf.textContent = 'Face on screen';
                 }
             } else {
                 banner.className = 'status-banner status-clear';
-                text.textContent = 'ALL CLEAR';
+                text.textContent = 'All clear';
                 conf.textContent = '';
-                icon.textContent = '👁';
             }
 
             document.getElementById('kill-count').textContent = data.kill_count_today;
             document.getElementById('streak-time').textContent = formatStreak(data.current_streak);
 
             const cs = document.getElementById('cooldown-status');
-            cs.textContent = data.on_cooldown ? 'COOLDOWN' : 'ARMED';
+            cs.textContent = data.on_cooldown ? 'Cooldown' : 'Armed';
             cs.style.color = data.on_cooldown ? 'var(--yellow)' : 'var(--green)';
 
             // Distraction card
@@ -191,10 +186,10 @@ function updateDashboard() {
             if (data.distraction_detected) {
                 distrCard.style.display = 'block';
                 distrApp.textContent   = data.distraction_label || 'Unknown';
-                distrIcon.textContent  = data.distraction_source === 'web' ? '🌐' : '🔸';
+                distrIcon.textContent  = data.distraction_source === 'web' ? 'WEB' : 'APP';
                 distrLabel.textContent = data.distraction_source === 'web'
-                    ? 'BROWSER DISTRACTION DETECTED'
-                    : 'DISTRACTING APP DETECTED';
+                    ? 'Browser distraction'
+                    : 'Distracting app';
                 if (data.distraction_duration > 0) {
                     const s = Math.round(data.distraction_duration);
                     distrDur.textContent = s + 's';
@@ -290,8 +285,8 @@ function updateCalendar() {
                             dayBadge = `<span class="task-day">${d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'})}</span>`;
                         }
                     }
-                    html += `<div class="calendar-event${overdue ? ' task-overdue' : ''}">
-                        <span class="event-summary">📋 ${t.title}</span>
+                    html += `<div class="calendar-event task-row${overdue ? ' task-overdue' : ''}">
+                        <span class="event-summary">${t.title}</span>
                         ${dayBadge || (t.tasklist ? `<span class="event-time">${t.tasklist}</span>` : '')}
                     </div>`;
                 });
@@ -313,13 +308,18 @@ function renderEvents(events, nowMs) {
         const endStr   = end   ? end.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})   : '';
         const isActive = nowMs > 0 && start && end &&
                          nowMs >= start.getTime() && nowMs <= end.getTime();
+        // Completed events are tagged with a prefix in Google Calendar so the
+        // state round-trips across reloads. New writes use "[done]"; older
+        // writes used "✅" — accept both for backwards compatibility.
+        const isDone = ev.summary.startsWith('[done]') || ev.summary.startsWith('✅');
+        const displaySummary = ev.summary.replace(/^(\[done\]|✅)\s*/, '');
         html += `
-            <div class="calendar-event${isActive ? ' event-active' : ''}">
+            <div class="calendar-event${isActive ? ' event-active' : ''}${isDone ? ' event-done' : ''}">
                 <label class="event-check">
                     <input type="checkbox"
                         onchange="completeTask('${ev.id}', this)"
-                        ${ev.summary.startsWith('✅') ? 'checked disabled' : ''}>
-                    <span class="event-summary">${ev.summary}</span>
+                        ${isDone ? 'checked disabled' : ''}>
+                    <span class="event-summary">${displaySummary}</span>
                 </label>
                 <span class="event-time">${startStr}${endStr ? ' – ' + endStr : ''}</span>
             </div>`;
@@ -373,7 +373,7 @@ function updateWeekPlan() {
                 }
                 if (day.tasks && day.tasks.length > 0) {
                     day.tasks.forEach(t => {
-                        html += `<div class="week-day-task">📋 ${t.title}</div>`;
+                        html += `<div class="week-day-task">${t.title}</div>`;
                     });
                 }
                 html += `</div>`;

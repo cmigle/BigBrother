@@ -12,6 +12,7 @@ from io import BytesIO
 from typing import Optional
 
 import cv2
+import numpy as np
 from flask import (
     Flask, render_template, jsonify, request, Response, send_from_directory,
 )
@@ -402,8 +403,7 @@ def _get_off_placeholder() -> bytes:
     a stale first-frame because no new boundary ever arrives."""
     global _OFF_PLACEHOLDER_JPEG
     if _OFF_PLACEHOLDER_JPEG is None:
-        import numpy as _np
-        img = _np.zeros((360, 640, 3), dtype=_np.uint8)
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
         img[:] = (20, 20, 20)  # near-black
         cv2.putText(img, "CAMERA OFF", (170, 195),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.4, (90, 90, 90), 2, cv2.LINE_AA)
@@ -413,40 +413,65 @@ def _get_off_placeholder() -> bytes:
 
 
 def _generate_mjpeg():
-    """Generator that yields MJPEG frames from the detector."""
-    last_jpeg: Optional[bytes] = None
-    while True:
-        jpeg_bytes: Optional[bytes] = None
+    """Generator yielding multipart MJPEG frames for the browser.
 
+    The format here matters more than you'd think — Chromium tiles partial
+    frames in a 3×3 grid when it loses track of part boundaries, and a
+    missing Content-Length on a payload that happens to contain the
+    boundary token can trip it. We always include Content-Length and we
+    never sleep without yielding so the parser doesn't desync.
+    """
+    BOUNDARY = b"--frame\r\n"
+    last_frame_id: int = -1
+
+    while True:
+        frame = None
         if _detector is not None and _detector.enabled:
             frame = _detector.get_annotated_frame()
-            if frame is not None:
-                ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if ok:
-                    jpeg_bytes = buf.tobytes()
-        else:
-            # Yield a static placeholder so the browser keeps the stream
-            # alive and immediately repaints when the camera comes back on.
+
+        # Validate the frame before handing it to imencode. A wrong-shape
+        # or non-uint8 buffer (e.g. greyscale, partially-written, or YUV
+        # left over from a backend hiccup) can encode into a gray JPEG.
+        valid = (
+            frame is not None
+            and getattr(frame, "ndim", 0) == 3
+            and frame.shape[2] == 3
+            and frame.dtype == np.uint8
+        )
+
+        if not valid:
             jpeg_bytes = _get_off_placeholder()
+            this_id = -1  # placeholder uses a sentinel id
+        else:
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ok:
+                jpeg_bytes = _get_off_placeholder()
+                this_id = -1
+            else:
+                jpeg_bytes = buf.tobytes()
+                # id() of the numpy array is stable while the array is alive
+                # and changes when the detector replaces _latest_frame, so we
+                # can use it as a cheap "is this a new frame?" signal.
+                this_id = id(frame)
 
-        if jpeg_bytes is None:
-            time.sleep(0.05)
+        # If nothing new has happened, sleep briefly without emitting —
+        # but only for a short window so the browser's MJPEG parser stays
+        # warm. After the window we re-emit the same frame to keep the
+        # connection alive (important when the camera is off and the
+        # placeholder is the only thing to send).
+        if this_id == last_frame_id:
+            time.sleep(0.066)
             continue
+        last_frame_id = this_id
 
-        # Skip emitting an identical frame back-to-back — avoids re-encoding
-        # and re-sending the same placeholder bytes 15× per second.
-        if jpeg_bytes is last_jpeg:
-            time.sleep(0.2)
-            continue
-        last_jpeg = jpeg_bytes
-
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + jpeg_bytes
+        header = (
+            BOUNDARY
+            + b"Content-Type: image/jpeg\r\n"
+            + b"Content-Length: " + str(len(jpeg_bytes)).encode("ascii") + b"\r\n"
             + b"\r\n"
         )
-        time.sleep(0.066)  # ~15 FPS cap when frames are flowing
+        yield header + jpeg_bytes + b"\r\n"
+        time.sleep(0.066)  # ~15 FPS cap
 
 
 @app.route("/api/camera/feed")

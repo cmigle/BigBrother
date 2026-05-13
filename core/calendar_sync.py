@@ -446,7 +446,12 @@ class CalendarSync:
                 ).execute()
 
                 event["colorId"] = "11"  # Green in Google Calendar
-                event["summary"] = "✅ " + event.get("summary", "")
+                # Prefix marker so we can recognise completed events on reload.
+                # Plain text instead of an emoji so the title reads cleanly in
+                # the native Google Calendar UI too.
+                summary = event.get("summary", "")
+                if not summary.startswith("[done]"):
+                    event["summary"] = "[done] " + summary
 
                 self._service.events().update(
                     calendarId=self.calendar_id, eventId=event_id, body=event

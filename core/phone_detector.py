@@ -106,6 +106,15 @@ class PhoneDetector:
         self._motion_window: float = 2.5
         self._motion_threshold: float = 35.0
         self._motion_grace: float = 2.0
+        # Detection-loss tolerance: if YOLO misses the phone for fewer than
+        # this many seconds, we keep treating it as present (using the last
+        # known bbox). At 15 FPS this absorbs 30+ dropped frames before we
+        # admit the phone is really gone — gets rid of the "timer keeps
+        # resetting" feel during testing. Setting this to 0 disables it.
+        self._loss_tolerance: float = 2.0
+        self._last_seen_time: Optional[float] = None
+        self._last_known_box: Optional[Tuple[int, int, int, int]] = None
+        self._last_known_conf: float = 0.0
         # Rolling buffer of (timestamp, cx, cy)
         self._centroid_history: Deque[Tuple[float, float, float]] = collections.deque()
         self._phone_first_seen: Optional[float] = None  # time phone first appeared
@@ -376,7 +385,50 @@ class PhoneDetector:
 
         # Update detection state
         now = time.time()
-        detected = best_conf > 0
+        real_detection = best_conf > 0
+        used_remembered_box = False
+
+        # ── Detection-loss tolerance ─────────────────────────────────────
+        # YOLO occasionally drops a frame: confidence noise, motion blur, an
+        # arm momentarily covering the phone. Without this, every miss resets
+        # the "phone visible for N seconds" timer and the scare never fires.
+        # When we miss but recently HAD a real detection, pretend the phone
+        # is still where it was. Don't extend the centroid history (a frozen
+        # position would skew motion calculations); just keep the state.
+        if real_detection:
+            self._last_seen_time = now
+            self._last_known_box = best_box
+            self._last_known_conf = best_conf
+            detected = True
+        elif (
+            self._loss_tolerance > 0
+            and self._last_seen_time is not None
+            and self._last_known_box is not None
+            and (now - self._last_seen_time) <= self._loss_tolerance
+        ):
+            # Reuse the remembered detection for this frame only.
+            detected = True
+            used_remembered_box = True
+            best_box = self._last_known_box
+            best_conf = self._last_known_conf
+            # Draw a faded outline + "tracking…" label so it's obvious during
+            # testing that we're inside the grace window.
+            x1, y1, x2, y2 = best_box
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 100, 180), 1)
+            cv2.putText(
+                annotated, f"tracking {now - self._last_seen_time:.1f}s",
+                (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 100, 180), 1,
+            )
+        else:
+            detected = False
+            # Memory expired — clear it so a future detection counts as fresh.
+            if (
+                self._last_seen_time is not None
+                and (now - self._last_seen_time) > self._loss_tolerance
+            ):
+                self._last_seen_time = None
+                self._last_known_box = None
+                self._last_known_conf = 0.0
 
         # ── Motion-based active-use detection ────────────────────────────
         # Track the phone centroid over time. Stationary = on desk (passive).
@@ -392,8 +444,11 @@ class PhoneDetector:
             if self._phone_first_seen is None:
                 self._phone_first_seen = now
 
-            # Append to rolling centroid history
-            self._centroid_history.append((now, cx, cy))
+            # Only append to centroid history on REAL detections. A remembered
+            # box is a frozen position; appending it would fake "stationary"
+            # readings and could falsely classify a moving phone as on-desk.
+            if not used_remembered_box:
+                self._centroid_history.append((now, cx, cy))
 
             # Purge entries older than the motion window
             cutoff = now - self._motion_window
