@@ -24,10 +24,15 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+# Office lock files (e.g. ~$Doc.docx)
+~$*
 
-# Secrets
-config/credentials.json
-config/token.json
+# Secrets — OAuth client config and user tokens (incl. accidental "copy" duplicates)
+config/credentials*.json
+config/client_secret*.json
+config/token*.json
+*.pem
+*.key
 
 # Personal overrides (camera, calendar_id, etc.) — create your own from local.yaml.example
 config/local.yaml
