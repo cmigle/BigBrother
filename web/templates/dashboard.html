@@ -101,6 +101,11 @@
 <script>
 // ── TTS (server-rendered via /api/roast/audio with edge-tts) ─────────
 let _lastSpokenRoast = '';
+// Highest roast_id we've seen this page-session. Initialised lazily on the
+// first /api/status response so we DON'T auto-play whatever roast was
+// already cached on the server when the page loaded.
+let _baselineRoastId = null;
+let _lastPlayedRoastId = null;
 const _roastAudio = new Audio();
 _roastAudio.preload = 'auto';
 
@@ -200,14 +205,22 @@ function updateDashboard() {
                 distrCard.style.display = 'none';
             }
 
-            // Roast
+            // Roast — only auto-speak when the server's roast_id has
+            // advanced since this page session started. That kills the
+            // page-load replay AND the "speak twice" effect, because the
+            // text shown updates from /api/status polls but the audio only
+            // plays once per genuine new roast.
             const roastCard = document.getElementById('roast-card');
             const roastText = document.getElementById('roast-text');
+            const currentRoastId = data.latest_roast_id || 0;
+            if (_baselineRoastId === null) _baselineRoastId = currentRoastId;
             if (data.latest_roast) {
-                const isNew = roastText.textContent !== data.latest_roast;
                 roastCard.style.display = 'block';
                 roastText.textContent = data.latest_roast;
-                if (isNew) speakRoast(data.latest_roast);
+                if (currentRoastId > _baselineRoastId && currentRoastId !== _lastPlayedRoastId) {
+                    _lastPlayedRoastId = currentRoastId;
+                    speakRoast(data.latest_roast);
+                }
             }
 
             // Guess (only show if no roast is active and guess exists)

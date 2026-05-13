@@ -1,79 +1,76 @@
-# Fallback drill-sergeant roasts. Used when Ollama / Claude are unavailable.
+# Fallback roasts. Used when Ollama / Claude are unavailable.
 #
-# Available placeholders:
-#   {event}          — the current calendar event, OR a time-aware activity
-#                      substitute (e.g. "your afternoon grind", "sleep")
-#                      when nothing is scheduled. Pre-filled by ai_coach.py.
-#   {next_event}     — the next upcoming event ("Untitled" if none)
-#   {minutes_until}  — minutes until next_event starts ("??" if unknown)
-#   {kill_count}     — number of times caught today
+# Placeholders: {event} {next_event} {minutes_until} {kill_count}
 #
-# Writing guidelines:
-#   - 1–3 sentences max — these get spoken aloud, so short hits land harder
-#   - Start with a reaction beat ("BANG!", "Again?", "Shot #{kill_count}!")
-#     so the voice cue feels theatrical
-#   - Be biting, not mean. Specific > generic. Reference the {event}.
-#   - Vary sentence rhythm — staccato hits and longer setups should mix
+# Rules of thumb when adding new lines:
+#   - No leading "BANG!" — the gunshot SFX already fires.
+#   - Vary the opening word. A name. A noun. A question. A pause.
+#   - Specific > generic. Reference {event} where it lands.
+#   - 1–3 sentences. Spoken aloud. Rhythm matters more than length.
+#   - Channel something the user has actually heard before: Full Metal Jacket,
+#     Whiplash, GoodFellas voiceover, /r/getmotivated comments,
+#     stand-up bit, locker-room speech. Don't sound like an HR memo.
 roasts:
-  # ── Calendar-aware (use {event}) ────────────────────────────────────
-  - "BANG! '{event}' is waiting. Your phone isn't. Pick one."
-  - "Drop. The. Phone. '{event}' is happening with or without you."
-  - "BANG! You scheduled '{event}'. Past-you trusted future-you. Past-you was wrong."
-  - "Another one! '{event}' is literally on your calendar. Did you put it there as a joke?"
-  - "BANG! Your calendar says '{event}'. Your hands say Instagram. Reconcile that."
-  - "Shot #{kill_count}! '{event}' isn't going to finish itself, no matter how long you stare at that screen."
-  - "BANG! '{event}' RIGHT NOW. Not after this video. Not after one more swipe. Now."
-  - "You're meant to be on '{event}'. Instead you're here. With me. Disappointed."
+  # ── Cinema drill sergeant (Full Metal Jacket / Whiplash energy) ──
+  - "What. Is. Your. Major. Malfunction. '{event}' is right there."
+  - "Listen up, soldier. The phone is the enemy. '{event}' is the objective. Choose."
+  - "Not my tempo. Not even close. Back to '{event}'."
+  - "Were you DROPPED as a child? Or did you drop the phone yourself this time? Pick it up — wait. No. Put it down."
+  - "Is that your phone, private? Or is that the sound of your future career evaporating?"
+  - "I have seen mannequins with more discipline. '{event}'. Move."
 
-  # ── Next-event pressure ─────────────────────────────────────────────
-  - "BANG! '{next_event}' starts in {minutes_until} minutes. Plenty of time to keep scrolling, sure."
-  - "Shot #{kill_count}! '{next_event}' in {minutes_until} minutes and you're still on this thing."
-  - "Tick tock. '{next_event}' in {minutes_until} minutes. Tick tock."
-  - "BANG! {minutes_until} minutes till '{next_event}'. Use them. Or don't. I'll be here either way."
+  # ── Tony Soprano / GoodFellas voiceover ──
+  - "So you pick up the phone. Beautiful. Meanwhile, '{event}' is sitting there like a guy waiting for a meeting that ain't happening."
+  - "Look at this guy. Looks at his phone. Doesn't look at '{event}'. Tragic."
+  - "Hey. Hey. You. Yeah. The thing you're supposed to be doing is right there. Capisce?"
+  - "Every time you reach for that phone, somewhere a deadline gets a little closer. Just so you know."
 
-  # ── Kill-count escalation ───────────────────────────────────────────
-  - "BANG! That's {kill_count} today. You're not having a bad day — you're CHOOSING this."
-  - "Shot #{kill_count}! At this rate I'll need a bigger gun."
-  - "{kill_count} kills today. Your phone should file a missing persons report on your productivity."
-  - "BANG! {kill_count}. We're past 'oops' and well into 'this is who you are now'."
-  - "That's {kill_count}. Other people are out there living lives. You're out here breaking concentration records."
-  - "Shot #{kill_count}! Even my fallback roasts are running out of patience."
+  # ── Quiet, disappointed (Reddit /r/getmotivated tone) ──
+  - "You knew. The second your hand moved, you knew. Put it down."
+  - "Nobody is texting you anything you haven't seen ninety times today."
+  - "Two seconds ago you were going to finish '{event}'. What changed."
+  - "Phone. Back. Down. We can pretend this didn't happen."
+  - "I'm not even mad. I'm just keeping score. {kill_count}."
 
-  # ── Generic punch — no event, no count needed ───────────────────────
-  - "BANG! Put it down. You knew exactly what you were doing."
-  - "Another one. The phone is winning. Are you okay with that?"
-  - "BANG! Two seconds ago you had momentum. Two seconds ago."
-  - "Caught. Again. The dopamine isn't even good this time, is it?"
-  - "BANG! That's not a break. That's a surrender."
-  - "Drop it. Whatever you're checking can wait. It's always been able to wait."
-  - "BANG! You. Are. Not. That. Important. Nothing happened in the last six minutes. Check later."
-  - "Shot fired. Phone down. Eyes up. Do the thing."
+  # ── Stand-up / dry observation ──
+  - "Sixteen apps. None of them are '{event}'. Math isn't working out for you today."
+  - "Fascinating. You opened the phone before deciding what to look at. That's not a habit, that's a reflex."
+  - "Genuinely curious — what were you hoping to find this time?"
+  - "The phone hasn't moved in six minutes. You moved toward it. That's on you."
 
-  # ── Time-aware (works with {event} substitute when no calendar) ─────
-  - "BANG! '{event}'. That's what you should be on. Not whatever doomscroll cave you just opened."
-  - "It's been {kill_count} times today and we're not even done. Get back to '{event}'."
-  - "BANG! Nothing scheduled doesn't mean nothing to do. '{event}'. Go."
-  - "Another one. '{event}' is right there. Literally right there."
+  # ── Locker-room / coach mode ──
+  - "We talked about this. {kill_count} times today, in fact."
+  - "Phone DOWN. Eyes UP. '{event}'. Go."
+  - "Reset. Breathe. Back to '{event}'. We're not losing momentum over this."
+  - "Don't make me come over there. '{event}'. Now."
 
-  # ── Self-aware / meta ───────────────────────────────────────────────
-  - "BANG! I am a piece of software yelling at you. Think about how we got here."
-  - "Caught. Look at us. A camera and a YAML file are your accountability buddies. Fix your life."
-  - "BANG! I'm running on your CPU to call you out. That's the level we're operating at."
-  - "Shot #{kill_count}! Imagine explaining this app to someone. Now imagine explaining why you needed it."
+  # ── Calendar-pressure variants ──
+  - "'{next_event}' starts in {minutes_until} minutes. Plenty of time to keep doing this. Sure."
+  - "Clock's ticking. {minutes_until} minutes till '{next_event}'. Or doomscroll. Up to you. (It is not up to you.)"
+  - "'{event}'. Right now. Not after the next post."
+  - "Your calendar says one thing. Your thumb says another. Reconcile that."
 
-  # ── Quiet menace (lowercase, less shouty — variety in tone) ─────────
-  - "Caught you. '{event}'. Now."
-  - "Phone. Down. '{event}'. Up."
-  - "Hey. Eyes here. Then eyes on '{event}'."
-  - "That's {kill_count}. We both know what you should be doing."
+  # ── Kill-count escalation (gets more unhinged with count) ──
+  - "{kill_count}. Just so we're keeping numbers."
+  - "{kill_count} times today. Other people have hobbies. You have a phone."
+  - "Caught again. That's {kill_count}. We are LAPPING productivity."
+  - "{kill_count}. At this point I'd respect it if it was intentional."
+  - "You're {kill_count} for {kill_count} today. Undefeated streak of losing."
 
-  # ── Future-self / accountability ────────────────────────────────────
-  - "BANG! Future-you is begging present-you to put it down. Listen for once."
-  - "Shot fired. The version of you who finishes '{event}' is somewhere in here. Find them."
-  - "BANG! Past-you committed to '{event}'. Don't make past-you look like an idiot."
-  - "{kill_count} interruptions. Each one is a brick out of the wall you were building."
+  # ── Unhinged single-liners (use sparingly — they're the closers) ──
+  - "No."
+  - "Phone down. Five words. Phone. Down. Phone. DOWN."
+  - "Try harder."
+  - "Look at me. I am the calendar now. '{event}'."
+  - "Drop it. Like you mean it. Like '{event}' is watching."
 
-  # ── Closer-style — drop the mic ─────────────────────────────────────
-  - "BANG! '{event}'. That's the whole roast. Get to work."
-  - "Phone DOWN. '{event}' UP. End of debate."
-  - "Shot #{kill_count}! I've said my piece. Your move."
+  # ── Self-aware meta ──
+  - "I am a YAML file yelling at you through a webcam. Reflect on that for a second."
+  - "You built this. The detector. The roast. The voice. To stop yourself. And here we are. Astonishing."
+  - "A computer noticed your hand move. Of all the indignities."
+
+  # ── Future-self / accountability ──
+  - "The version of you who finishes '{event}' is somewhere in this room. Be that version."
+  - "Five minutes from now you won't remember why you picked it up. Put it down. Save the future regret."
+  - "Past-you blocked out time for '{event}'. Present-you is letting past-you down. Future-you is taking notes."
+  - "Imagine explaining this to someone you respect. Now don't do that thing."

@@ -102,6 +102,7 @@ def api_status():
             on_cooldown = _scare.is_on_cooldown()
 
         latest_roast = _coach.get_latest_roast() if _coach else ""
+        latest_roast_id = getattr(_coach, "roast_id", 0) if _coach else 0
         latest_guess = _coach.get_guess() if _coach else ""
 
         # Process / browser distraction
@@ -125,6 +126,7 @@ def api_status():
         "kill_count_today": today.get("kill_count", 0),
         "current_streak": round(streak, 1),
         "latest_roast": latest_roast,
+        "latest_roast_id": latest_roast_id,
         "latest_guess": latest_guess,
         "distraction_detected": distraction_detected,
         "distraction_label":    distraction_label,
@@ -216,23 +218,54 @@ def api_roast_speak():
     return jsonify({"success": True, "roast": roast})
 
 
-# In-memory MP3 cache keyed by (voice, text) so repeated dashboard polls
-# don't re-render the same roast. Hard cap so we don't leak forever.
+# In-memory MP3 cache keyed by (voice, rate, pitch, volume, text) so repeated
+# dashboard polls don't re-render the same roast. Hard cap so we don't leak.
 _TTS_CACHE: dict = {}
 _TTS_CACHE_MAX = 32
 _TTS_LOCK = threading.Lock()
 
+# Voice rotation. edge-tts voices are inherently TTS-flat, so the way to
+# fight monotony is variety, not louder prosody. Each roast picks a voice
+# deterministically from its roast_id so the same roast always renders the
+# same way (so the MP3 cache hits) but a sequence of roasts cycles voices.
+#
+# Each tuple: (voice, rate, pitch, volume). Hand-tuned by ear.
+_VOICE_ROTATION = [
+    # Brian: most expressive of the US set, slight rasp
+    ("en-US-BrianNeural",              "+10%", "-3Hz",  "+30%"),
+    # Ryan: British sneer, very different rhythm — breaks monotony hard
+    ("en-GB-RyanNeural",               "+5%",  "-3Hz",  "+30%"),
+    # Andrew: deep authoritative news-anchor, lands the longer cinema lines
+    ("en-US-AndrewMultilingualNeural", "+10%", "-5Hz",  "+30%"),
+]
+_VOICE_DEFAULT  = _VOICE_ROTATION[0][0]
+_RATE_DEFAULT   = _VOICE_ROTATION[0][1]
+_PITCH_DEFAULT  = _VOICE_ROTATION[0][2]
+_VOLUME_DEFAULT = _VOICE_ROTATION[0][3]
 
-def _render_edge_tts(text: str, voice: str = "en-US-GuyNeural") -> Optional[bytes]:
+
+def _pick_voice(roast_id: int) -> tuple:
+    """Deterministically rotate voices by roast_id so the audio for a given
+    roast is stable (cacheable) but a series of roasts cycles voices."""
+    return _VOICE_ROTATION[roast_id % len(_VOICE_ROTATION)]
+
+
+def _render_edge_tts(
+    text: str,
+    voice: str = _VOICE_DEFAULT,
+    rate: str = _RATE_DEFAULT,
+    pitch: str = _PITCH_DEFAULT,
+    volume: str = _VOLUME_DEFAULT,
+) -> Optional[bytes]:
     """Synchronously render `text` to MP3 bytes via edge-tts. Cached."""
-    key = (voice, text)
+    key = (voice, rate, pitch, volume, text)
     with _TTS_LOCK:
         if key in _TTS_CACHE:
             return _TTS_CACHE[key]
     try:
         import asyncio, edge_tts
         async def _do():
-            comm = edge_tts.Communicate(text, voice)
+            comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, volume=volume)
             chunks = bytearray()
             async for ev in comm.stream():
                 if ev.get("type") == "audio":
@@ -258,15 +291,33 @@ def api_roast_audio():
     """Return the latest roast as MP3 audio for browser playback.
 
     The dashboard polls /api/status and discovers a new roast; it then loads
-    /api/roast/audio?key=<roast-text> and plays the MP3. Caching is keyed on
-    the text so the same roast is rendered exactly once."""
+    /api/roast/audio?text=<roast-text> and plays the MP3. Caching is keyed on
+    (voice, rate, pitch, volume, text) so the same roast is rendered once."""
     text = request.args.get("text", "").strip()
     if not text and _coach is not None:
         text = _coach.get_latest_roast()
     if not text:
         return jsonify({"error": "No text"}), 404
-    voice = request.args.get("voice", "en-US-GuyNeural")
-    mp3 = _render_edge_tts(text, voice)
+
+    # Voice rotation: if the caller specifies a voice explicitly, honour it;
+    # otherwise pick by roast_id (or by text hash as a fallback so manual
+    # ▶ SPEAK on the same roast gets the same voice every time).
+    if "voice" in request.args:
+        voice  = request.args.get("voice",  _VOICE_DEFAULT)
+        rate   = request.args.get("rate",   _RATE_DEFAULT)
+        pitch  = request.args.get("pitch",  _PITCH_DEFAULT)
+        volume = request.args.get("volume", _VOLUME_DEFAULT)
+    else:
+        rid = getattr(_coach, "roast_id", 0) if _coach else 0
+        # If the text matches the current roast, use roast_id. Otherwise
+        # derive a stable rotation slot from the text itself so a re-render
+        # of an old roast always sounds the same.
+        if _coach and text == _coach.get_latest_roast():
+            slot = rid
+        else:
+            slot = hash(text) & 0x7fffffff
+        voice, rate, pitch, volume = _pick_voice(slot)
+    mp3 = _render_edge_tts(text, voice, rate, pitch, volume)
     if mp3 is None:
         return jsonify({"error": "TTS render failed"}), 500
     return Response(mp3, mimetype="audio/mpeg")
@@ -274,16 +325,17 @@ def api_roast_audio():
 
 @app.route("/api/guess")
 def api_guess():
-    """Educated guess about what the user should be doing (no calendar event)."""
+    """Educated guess about what the user should be doing.
+
+    Calendar-aware: when a current event is active the guess names it; when
+    one is starting soon it mentions the runway; otherwise it falls back to
+    time-of-day phrasing. The coach handles all that internally now."""
     if _coach is None:
         return jsonify({"guess": "You should be working. Obviously."}), 200
-    # Check if there's a current event — only generate guess if nothing scheduled
     has_event = False
     if _calendar and _calendar.is_authenticated:
-        ev = _calendar.get_current_event()
-        has_event = ev is not None
-    guess = _coach.generate_guess() if not has_event else ""
-    return jsonify({"guess": guess, "has_current_event": has_event})
+        has_event = _calendar.get_current_event() is not None
+    return jsonify({"guess": _coach.generate_guess(), "has_current_event": has_event})
 
 
 @app.route("/api/cameras")

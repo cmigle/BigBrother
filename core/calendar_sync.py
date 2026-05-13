@@ -274,10 +274,15 @@ class CalendarSync:
     def _maybe_refresh(self):
         """Refresh events (today + tomorrow) and tasks if the cache is stale.
 
-        Guarded by _api_lock so concurrent /api/calendar requests don't each
-        kick off a fresh trio of API calls — the second caller blocks, then
-        sees the updated _last_refresh and skips."""
+        Hot path (cache fresh) avoids the lock entirely so dashboard polls
+        that just read cached data don't queue behind one another. Only
+        when a refresh is actually needed do we take the lock and re-check
+        under it to avoid two callers both refreshing."""
+        if time.time() - self._last_refresh <= self.refresh_interval:
+            return
         with self._api_lock:
+            # Re-check under the lock: another thread may have refreshed
+            # while we were waiting.
             if time.time() - self._last_refresh > self.refresh_interval:
                 self.fetch_events()          # populates _events_cache (today)
                 self.fetch_tomorrow_events() # populates _tomorrow_cache

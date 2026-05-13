@@ -21,26 +21,24 @@ import yaml
 logger = logging.getLogger(__name__)
 
 DRILL_SERGEANT_PROMPT = """You are a sarcastic, over-the-top drill sergeant AI coach in an anti-phone-distraction app called BigBrother.
-The user just got caught picking up their phone. A loud gunshot sound was played to scare them.
-Now deliver a short (2-3 sentences max), funny, biting roast telling them what they should be doing instead.
+The user just got caught picking up their phone. A loud gunshot sound has already played.
+Now deliver a short (1-3 sentences), funny, biting roast telling them to get back to work.
 
 Context:
 - Current time: {current_time}
 - Day of week: {day_of_week}
 - Current calendar event: {current_event}
 - Next upcoming event: {next_event}
-- Pending tasks this week: {pending_tasks}
 - Times caught today: {kill_count}
 - Time since last caught: {time_since_last}
 
 Rules:
-- Be funny and sarcastic but not mean-spirited
-- If there is a current calendar event, reference it by name
-- If there are pending tasks, mention one of them by name (and when it's due) to shame the user
-- If NO event is currently scheduled (event says "Nothing scheduled"), make an EDUCATED GUESS about what they should be doing based on the time and day — e.g. if it's evening on a weekday guess they have assignments/studying, if it's morning guess they have work/classes, if it's late guess they should sleep. Be specific and creative with the guess.
-- If they've been caught many times today, roast them harder
-- Keep it under 3 sentences
-- Start with a reaction to the gunshot (e.g., "BANG!", "Another one!", "Again?!")
+- Be sharp, specific, theatrical. Channel a movie drill sergeant, not a corporate trainer.
+- If there is a current calendar event, reference it by name.
+- If NO event is currently scheduled, work with the time/day instead (assume they have something to do).
+- Escalate intensity with kill_count — first offense is wry, fifth is fed up, tenth is unhinged.
+- Keep it under 3 sentences and DO NOT start with "BANG!" — the gunshot SFX already plays.
+- Vary openings (a name, a noun, a question, a quiet observation). Avoid all-caps shouting throughout.
 """
 
 GUESS_PROMPT = """You are a brutally honest but funny productivity coach.
@@ -96,6 +94,16 @@ class AICoach:
         self._fallback_roasts: List[str] = []
         self._tts_lock = threading.Lock()
         self._last_roast_time: float = 0
+        # Monotonic id so the browser can detect a *new* scare-triggered
+        # roast rather than re-speaking whatever was cached at page load.
+        self.roast_id: int = 0
+        # Ollama backoff: once a request fails (connection refused, timeout)
+        # we skip future requests for this many seconds. The dashboard polls
+        # /api/status every 2s and that path now generates guesses, so without
+        # a backoff a single Ollama-unreachable error makes every poll wait
+        # the full HTTP timeout (8s) and the UI stalls.
+        self._ollama_skip_until: float = 0.0
+        self._ollama_backoff_seconds: float = 60.0
 
         self._load_fallback_roasts(fallback_roasts_path)
 
@@ -130,24 +138,26 @@ class AICoach:
         Generate a sarcastic roast based on current calendar and stats.
         Tries Ollama first, falls back to template roasts.
         """
-        # Gather context
+        # Gather context. Google Tasks intentionally excluded — only calendar
+        # events feed the roast template, so users don't get shamed for the
+        # entire week's task backlog every time they pick up their phone.
         now = datetime.now()
         current_event = self._get_current_event_text()
         next_event = self._get_next_event_text()
-        pending_tasks = self._get_pending_tasks_text()
         kill_count = self.stats.get_today_stats().get("kill_count", 0)
         time_since = self._format_time_since_last()
         current_time = now.strftime("%I:%M %p")
         day_of_week = now.strftime("%A")
 
         # Try Ollama
-        roast = self._try_ollama(current_time, day_of_week, current_event, next_event, pending_tasks, kill_count, time_since)
+        roast = self._try_ollama(current_time, day_of_week, current_event, next_event, "", kill_count, time_since)
 
         if roast is None:
-            roast = self._fallback_roast(current_event, next_event, kill_count, pending_tasks)
+            roast = self._fallback_roast(current_event, next_event, kill_count)
 
         self.last_roast = roast
         self._last_roast_time = time.time()
+        self.roast_id += 1
 
         # Log to history
         self._log_roast(roast, current_event, next_event, kill_count)
@@ -159,6 +169,8 @@ class AICoach:
         pending_tasks: str, kill_count: int, time_since: str,
     ) -> Optional[str]:
         """Attempt to generate a roast via Ollama. Returns None on failure."""
+        if time.time() < self._ollama_skip_until:
+            return None
         prompt = DRILL_SERGEANT_PROMPT.format(
             current_time=current_time,
             day_of_week=day_of_week,
@@ -187,40 +199,35 @@ class AICoach:
                 return roast
         except requests.ConnectionError:
             logger.warning("Ollama not reachable at %s — using fallback", self.url)
+            self._ollama_skip_until = time.time() + self._ollama_backoff_seconds
         except requests.Timeout:
             logger.warning("Ollama timed out — using fallback")
+            self._ollama_skip_until = time.time() + self._ollama_backoff_seconds
         except Exception as exc:
             logger.warning("Ollama error: %s — using fallback", exc)
 
         return None
 
-    def _fallback_roast(self, current_event: str, next_event: str, kill_count: int, pending_tasks: str = "") -> str:
+    def _fallback_roast(self, current_event: str, next_event: str, kill_count: int) -> str:
         """Pick a random template roast and fill in placeholders."""
-        # When nothing is currently scheduled, substitute a task name or
-        # a time-aware activity so the roast doesn't read "Nothing scheduled
-        # right now' needs you" verbatim.
+        # When nothing is currently scheduled, substitute a time-aware activity
+        # so the roast reads naturally instead of "'Nothing scheduled right
+        # now' needs you". Google Tasks intentionally not consulted here.
         event_substitute = current_event
         if current_event == "Nothing scheduled right now":
-            if pending_tasks and pending_tasks not in ("No pending tasks this week", "No tasks"):
-                # e.g. "Finish report (due today), Review PR (due tomorrow)"
-                first_task = pending_tasks.split(",")[0].strip()
-                if " (due " in first_task:
-                    first_task = first_task[:first_task.index(" (due ")]
-                event_substitute = first_task
+            hour = datetime.now().hour
+            if hour < 9:
+                event_substitute = "morning prep"
+            elif hour < 12:
+                event_substitute = "your morning work"
+            elif hour < 14:
+                event_substitute = "your afternoon grind"
+            elif hour < 17:
+                event_substitute = "whatever deadline you're dodging"
+            elif hour < 20:
+                event_substitute = "your evening to-do list"
             else:
-                hour = datetime.now().hour
-                if hour < 9:
-                    event_substitute = "morning prep"
-                elif hour < 12:
-                    event_substitute = "your morning work"
-                elif hour < 14:
-                    event_substitute = "your afternoon grind"
-                elif hour < 17:
-                    event_substitute = "whatever deadline you're dodging"
-                elif hour < 20:
-                    event_substitute = "your evening to-do list"
-                else:
-                    event_substitute = "sleep (yes, sleep)"
+                event_substitute = "sleep"
 
         template = random.choice(self._fallback_roasts)
 
@@ -250,55 +257,61 @@ class AICoach:
 
     def generate_guess(self) -> str:
         """
-        When no calendar event is active, generate an educated guess about
-        what the user should be doing based on the time and day of week.
-        Uses Ollama if available, otherwise returns a hardcoded time-aware fallback.
+        Return what the user should be doing right now. Calendar events take
+        priority over time-of-day heuristics so a real meeting is mentioned
+        by name. Falls back to time/day phrasing when nothing's scheduled.
         """
         now = datetime.now()
         hour = now.hour
         current_time = now.strftime("%I:%M %p")
         day_of_week = now.strftime("%A")
+
+        # ── 1. Calendar-first phrasing ────────────────────────────────
+        # Active right-now event wins. Then upcoming-soon (<=90 min).
+        # Then anything later today. Each branch produces a concrete
+        # sentence so we never need to fall through to the time fallback
+        # when the calendar has something to say.
+        cal_guess = self._calendar_guess(now)
+        if cal_guess:
+            self.last_guess = cal_guess
+            return cal_guess
+
+        # ── 2. Ollama (if running) — time-of-day prompt only ──────────
         next_event = self._get_next_event_text()
         kill_count = self.stats.get_today_stats().get("kill_count", 0)
+        if hour < 6:    time_of_day = "middle of the night"
+        elif hour < 9:  time_of_day = "early morning"
+        elif hour < 12: time_of_day = "morning"
+        elif hour < 14: time_of_day = "midday"
+        elif hour < 17: time_of_day = "afternoon"
+        elif hour < 20: time_of_day = "evening"
+        else:           time_of_day = "late night"
 
-        if hour < 6:
-            time_of_day = "middle of the night"
-        elif hour < 9:
-            time_of_day = "early morning"
-        elif hour < 12:
-            time_of_day = "morning"
-        elif hour < 14:
-            time_of_day = "midday"
-        elif hour < 17:
-            time_of_day = "afternoon"
-        elif hour < 20:
-            time_of_day = "evening"
-        else:
-            time_of_day = "late night"
+        if time.time() >= self._ollama_skip_until:
+            try:
+                prompt = GUESS_PROMPT.format(
+                    current_time=current_time,
+                    day_of_week=day_of_week,
+                    time_of_day=time_of_day,
+                    next_event=next_event,
+                    kill_count=kill_count,
+                )
+                resp = requests.post(
+                    f"{self.url}/api/generate",
+                    json={"model": self.model, "prompt": prompt, "stream": False},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                guess = resp.json().get("response", "").strip()
+                if guess:
+                    self.last_guess = guess
+                    return guess
+            except (requests.ConnectionError, requests.Timeout):
+                self._ollama_skip_until = time.time() + self._ollama_backoff_seconds
+            except Exception:
+                pass
 
-        # Try Ollama
-        try:
-            prompt = GUESS_PROMPT.format(
-                current_time=current_time,
-                day_of_week=day_of_week,
-                time_of_day=time_of_day,
-                next_event=next_event,
-                kill_count=kill_count,
-            )
-            resp = requests.post(
-                f"{self.url}/api/generate",
-                json={"model": self.model, "prompt": prompt, "stream": False},
-                timeout=8,
-            )
-            resp.raise_for_status()
-            guess = resp.json().get("response", "").strip()
-            if guess:
-                self.last_guess = guess
-                return guess
-        except Exception:
-            pass
-
-        # Hardcoded time-aware fallbacks
+        # ── 3. Time-of-day fallback (no calendar context available) ──
         is_weekend = day_of_week in ("Saturday", "Sunday")
         if hour < 6:
             guess = "It's the dead of night. Put the phone down and sleep, you absolute goblin."
@@ -322,11 +335,78 @@ class AICoach:
         self.last_guess = guess
         return guess
 
+    def _calendar_guess(self, now: datetime) -> Optional[str]:
+        """If the calendar has something to say about what you should be
+        doing right now, say it. Returns None when there's nothing in scope
+        and the caller should fall back to time-of-day phrasing."""
+        if self.calendar is None or not getattr(self.calendar, "is_authenticated", False):
+            return None
+
+        # ── Active event: highest priority ─────────────────────────────
+        current = self.calendar.get_current_event()
+        if current:
+            name = current.get("summary", "Untitled event")
+            end_str = self._format_event_time(current.get("end", ""))
+            if end_str:
+                return f"You're in '{name}' right now — until {end_str}. Eyes on the meeting, not the phone."
+            return f"You're in '{name}' right now. Eyes on the meeting, not the phone."
+
+        # ── Upcoming: prioritise things starting soon ─────────────────
+        nxt = self.calendar.get_next_event()
+        if nxt:
+            name = nxt.get("summary", "Untitled event")
+            start_iso = nxt.get("start", "")
+            mins_until = self._minutes_until(start_iso, now)
+            start_str = self._format_event_time(start_iso)
+            day_label = " tomorrow" if nxt.get("day") == "tomorrow" else ""
+            if mins_until is not None and 0 < mins_until <= 90:
+                # Imminent — call it out specifically
+                return (
+                    f"'{name}' starts in {mins_until} min"
+                    f"{' (' + start_str + ')' if start_str else ''}."
+                    f" Use the runway to prep, don't burn it on the phone."
+                )
+            if start_str:
+                return f"Next on your calendar: '{name}' at {start_str}{day_label}. Stay on task until then."
+            return f"Next on your calendar: '{name}'{day_label}. Stay on task until then."
+
+        # Nothing on the calendar at all — let the caller fall back.
+        return None
+
+    @staticmethod
+    def _format_event_time(iso_str: str) -> str:
+        """Parse a Google Calendar start/end string and return a local 'h:mm AM'."""
+        if not iso_str:
+            return ""
+        try:
+            # Handles both "...Z" and "...+00:00" forms
+            dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            # Convert to local time for display
+            return dt.astimezone().strftime("%I:%M %p").lstrip("0")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _minutes_until(iso_str: str, now: datetime) -> Optional[int]:
+        """Whole minutes between now and an event start. None on parse failure."""
+        if not iso_str:
+            return None
+        try:
+            dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+            # Compare in the same tz space
+            diff = (dt - now.astimezone(dt.tzinfo)).total_seconds() / 60
+            return max(0, int(diff))
+        except Exception:
+            return None
+
     def get_guess(self) -> str:
-        """Return the last generated guess, or generate a fresh one."""
-        if not self.last_guess:
-            return self.generate_guess()
-        return self.last_guess
+        """Always regenerate so the displayed guess tracks calendar state.
+
+        Without this, a guess generated at 9:00 ("standup starts in 5 min")
+        would still be shown at 10:30 after the meeting ended. generate_guess
+        is cheap when Ollama is off (calendar branch + a few string formats),
+        so we just run it every poll."""
+        return self.generate_guess()
 
     # ------------------------------------------------------------------
     # Calendar helpers
@@ -461,10 +541,12 @@ class AICoach:
     # ------------------------------------------------------------------
 
     def fire(self):
-        """Full pipeline: generate roast → display → speak."""
+        """Generate a new roast. Playback happens in the browser via
+        /api/roast/audio — we no longer call self.speak() here because it
+        used to fire the OS-level TTS at the same time the browser played
+        the MP3, causing two overlapping voices on every scare."""
         roast = self.generate_roast()
         logger.info("AI Coach says: %s", roast)
-        self.speak(roast)
 
     # ------------------------------------------------------------------
     # History / logging
