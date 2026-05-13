@@ -4,6 +4,21 @@
 {% block content %}
 <div class="dashboard">
 
+    <!-- Live-detection strip: toggle + inline mini-feed -->
+    <div class="live-strip">
+        <div class="live-strip-controls">
+            <div class="live-strip-title">LIVE DETECTION</div>
+            <label class="toggle">
+                <input type="checkbox" id="live-detection-toggle">
+                <span class="toggle-slider"></span>
+            </label>
+            <div class="live-strip-state" id="live-strip-state">OFF</div>
+        </div>
+        <div class="live-strip-feed" id="live-strip-feed" style="display:none;">
+            <img id="live-feed-img" alt="Live camera feed">
+        </div>
+    </div>
+
     <!-- Status banner -->
     <div id="status-banner" class="status-banner status-clear">
         <div class="status-icon" id="status-icon">👁</div>
@@ -362,6 +377,43 @@ function updateWeekPlan() {
         })
         .catch(err => console.error('Week plan fetch error:', err));
 }
+
+// ── Live-detection toggle ────────────────────────────────────────────
+const liveToggle = document.getElementById('live-detection-toggle');
+const liveState  = document.getElementById('live-strip-state');
+const liveFeed   = document.getElementById('live-strip-feed');
+const liveImg    = document.getElementById('live-feed-img');
+
+function applyLiveDetectionUI(enabled) {
+    liveToggle.checked = enabled;
+    liveState.textContent = enabled ? 'ON' : 'OFF';
+    liveState.classList.toggle('live-on', enabled);
+    if (enabled) {
+        // Cache-bust so the browser opens a fresh MJPEG stream rather than
+        // reusing a stale one that already ended at the placeholder frame.
+        liveImg.src = '/api/camera/feed?t=' + Date.now();
+        liveFeed.style.display = '';
+    } else {
+        liveFeed.style.display = 'none';
+        liveImg.removeAttribute('src');  // close the stream connection
+    }
+}
+
+// Pull current state from the server
+fetch('/api/settings')
+    .then(r => r.json())
+    .then(data => applyLiveDetectionUI(data.camera_enabled !== false))
+    .catch(() => applyLiveDetectionUI(false));
+
+liveToggle.addEventListener('change', () => {
+    const wantOn = liveToggle.checked;
+    applyLiveDetectionUI(wantOn);
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({camera_enabled: wantOn}),
+    }).catch(err => console.error('Toggle save failed:', err));
+});
 
 // ── Init ─────────────────────────────────────────────────────────────
 // Load voices (Chrome needs a user gesture or slight delay)

@@ -169,7 +169,13 @@ class PhoneDetector:
 
     def open_camera(self) -> bool:
         """Open the webcam and apply calibration settings. Returns True on success."""
-        self._cap = cv2.VideoCapture(self.camera_index)
+        # On Windows, MSMF (the default) sometimes opens the device but then
+        # returns -1072873821 (MF_E_HW_MFT_FAILED_START_STREAMING) on every
+        # grabFrame, leaving the feed stuck on a single frame. DirectShow is
+        # what list_cameras already uses successfully — match it here.
+        import sys
+        backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        self._cap = cv2.VideoCapture(self.camera_index, backend)
         if not self._cap.isOpened():
             logger.error("Could not open camera index %d", self.camera_index)
             return False

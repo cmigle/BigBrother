@@ -233,6 +233,47 @@ body::after {
 .muted { color: var(--fg-dim); font-size: 0.85rem; line-height: 1.7; }
 
 /* ================================================================
+   Live-detection strip (dashboard)
+   ================================================================ */
+.live-strip {
+    display: flex;
+    align-items: stretch;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding: 0.9rem 1.1rem;
+    background: linear-gradient(135deg, #030810, var(--bg-card));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+.live-strip-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex: 1;
+}
+.live-strip-title {
+    font-size: 0.78rem;
+    letter-spacing: 2px;
+    color: var(--fg-dim);
+}
+.live-strip-state {
+    font-size: 0.78rem;
+    letter-spacing: 2px;
+    color: var(--fg-dim);
+    min-width: 2.5rem;
+}
+.live-strip-state.live-on { color: var(--green); }
+.live-strip-feed {
+    width: 360px;
+    max-width: 50%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #000;
+}
+.live-strip-feed img { width: 100%; display: block; }
+
+/* ================================================================
    Status Banner
    ================================================================ */
 .status-banner {

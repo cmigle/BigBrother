@@ -285,30 +285,60 @@ def api_settings():
 # Camera feed (MJPEG stream)
 # ======================================================================
 
+_OFF_PLACEHOLDER_JPEG: Optional[bytes] = None
+
+
+def _get_off_placeholder() -> bytes:
+    """Return a cached 'camera off' JPEG so the MJPEG stream stays alive
+    even when the detector is disabled. Without this, the <img> tag holds
+    a stale first-frame because no new boundary ever arrives."""
+    global _OFF_PLACEHOLDER_JPEG
+    if _OFF_PLACEHOLDER_JPEG is None:
+        import numpy as _np
+        img = _np.zeros((360, 640, 3), dtype=_np.uint8)
+        img[:] = (20, 20, 20)  # near-black
+        cv2.putText(img, "CAMERA OFF", (170, 195),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (90, 90, 90), 2, cv2.LINE_AA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        _OFF_PLACEHOLDER_JPEG = buf.tobytes() if ok else b""
+    return _OFF_PLACEHOLDER_JPEG
+
+
 def _generate_mjpeg():
     """Generator that yields MJPEG frames from the detector."""
+    last_jpeg: Optional[bytes] = None
     while True:
-        frame = None
+        jpeg_bytes: Optional[bytes] = None
+
         if _detector is not None and _detector.enabled:
             frame = _detector.get_annotated_frame()
+            if frame is not None:
+                ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                if ok:
+                    jpeg_bytes = buf.tobytes()
+        else:
+            # Yield a static placeholder so the browser keeps the stream
+            # alive and immediately repaints when the camera comes back on.
+            jpeg_bytes = _get_off_placeholder()
 
-        if frame is None:
-            # Sleep longer when the camera is intentionally off so we don't
-            # burn CPU polling a disabled detector across multiple viewers.
-            time.sleep(0.5 if (_detector is None or not _detector.enabled) else 0.1)
+        if jpeg_bytes is None:
+            time.sleep(0.05)
             continue
 
-        ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        if not ret:
+        # Skip emitting an identical frame back-to-back — avoids re-encoding
+        # and re-sending the same placeholder bytes 15× per second.
+        if jpeg_bytes is last_jpeg:
+            time.sleep(0.2)
             continue
+        last_jpeg = jpeg_bytes
 
         yield (
             b"--frame\r\n"
             b"Content-Type: image/jpeg\r\n\r\n"
-            + jpeg.tobytes()
+            + jpeg_bytes
             + b"\r\n"
         )
-        time.sleep(0.066)  # ~15 FPS
+        time.sleep(0.066)  # ~15 FPS cap when frames are flowing
 
 
 @app.route("/api/camera/feed")
