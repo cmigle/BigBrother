@@ -39,7 +39,7 @@ ai_coach:
   ollama_model: "llama3"
   ollama_url: "http://localhost:11434"
   tts_enabled: true
-  tts_engine: "pyttsx3"
+  tts_engine: "edge-tts"
   fallback_roasts: "config/roasts.yaml"
 
 hardware:

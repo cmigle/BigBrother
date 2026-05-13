@@ -216,6 +216,62 @@ def api_roast_speak():
     return jsonify({"success": True, "roast": roast})
 
 
+# In-memory MP3 cache keyed by (voice, text) so repeated dashboard polls
+# don't re-render the same roast. Hard cap so we don't leak forever.
+_TTS_CACHE: dict = {}
+_TTS_CACHE_MAX = 32
+_TTS_LOCK = threading.Lock()
+
+
+def _render_edge_tts(text: str, voice: str = "en-US-GuyNeural") -> Optional[bytes]:
+    """Synchronously render `text` to MP3 bytes via edge-tts. Cached."""
+    key = (voice, text)
+    with _TTS_LOCK:
+        if key in _TTS_CACHE:
+            return _TTS_CACHE[key]
+    try:
+        import asyncio, edge_tts
+        async def _do():
+            comm = edge_tts.Communicate(text, voice)
+            chunks = bytearray()
+            async for ev in comm.stream():
+                if ev.get("type") == "audio":
+                    chunks.extend(ev["data"])
+            return bytes(chunks)
+        loop = asyncio.new_event_loop()
+        try:
+            mp3 = loop.run_until_complete(_do())
+        finally:
+            loop.close()
+    except Exception as exc:
+        logger.error("edge-tts render failed: %s", exc)
+        return None
+    with _TTS_LOCK:
+        if len(_TTS_CACHE) >= _TTS_CACHE_MAX:
+            _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+        _TTS_CACHE[key] = mp3
+    return mp3
+
+
+@app.route("/api/roast/audio")
+def api_roast_audio():
+    """Return the latest roast as MP3 audio for browser playback.
+
+    The dashboard polls /api/status and discovers a new roast; it then loads
+    /api/roast/audio?key=<roast-text> and plays the MP3. Caching is keyed on
+    the text so the same roast is rendered exactly once."""
+    text = request.args.get("text", "").strip()
+    if not text and _coach is not None:
+        text = _coach.get_latest_roast()
+    if not text:
+        return jsonify({"error": "No text"}), 404
+    voice = request.args.get("voice", "en-US-GuyNeural")
+    mp3 = _render_edge_tts(text, voice)
+    if mp3 is None:
+        return jsonify({"error": "TTS render failed"}), 500
+    return Response(mp3, mimetype="audio/mpeg")
+
+
 @app.route("/api/guess")
 def api_guess():
     """Educated guess about what the user should be doing (no calendar event)."""

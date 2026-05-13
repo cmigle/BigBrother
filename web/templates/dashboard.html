@@ -99,31 +99,28 @@
 
 {% block scripts %}
 <script>
-// ── TTS ─────────────────────────────────────────────────────────────
+// ── TTS (server-rendered via /api/roast/audio with edge-tts) ─────────
 let _lastSpokenRoast = '';
-const synth = window.speechSynthesis;
+const _roastAudio = new Audio();
+_roastAudio.preload = 'auto';
+
+function _markSpeaking(on) {
+    const btn = document.getElementById('speak-btn');
+    if (btn) btn.classList.toggle('speaking', on);
+}
+_roastAudio.addEventListener('playing', () => _markSpeaking(true));
+_roastAudio.addEventListener('ended',   () => _markSpeaking(false));
+_roastAudio.addEventListener('error',   () => _markSpeaking(false));
+_roastAudio.addEventListener('pause',   () => _markSpeaking(false));
 
 function speakRoast(text) {
     if (!text || text === _lastSpokenRoast) return;
     _lastSpokenRoast = text;
-    if (!synth) return;
-    synth.cancel();
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.rate = 1.05;
-    utt.pitch = 0.85;
-    utt.volume = 1.0;
-    // Pick an English voice if available
-    const voices = synth.getVoices();
-    const eng = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('male'))
-              || voices.find(v => v.lang.startsWith('en'))
-              || voices[0];
-    if (eng) utt.voice = eng;
-
-    const btn = document.getElementById('speak-btn');
-    if (btn) btn.classList.add('speaking');
-    utt.onend = () => { if (btn) btn.classList.remove('speaking'); };
-    utt.onerror = () => { if (btn) btn.classList.remove('speaking'); };
-    synth.speak(utt);
+    // Server caches by text — the `text` query param doubles as the cache key.
+    _roastAudio.src = '/api/roast/audio?text=' + encodeURIComponent(text);
+    // Some browsers block autoplay until the page has had a user gesture.
+    // play() returns a promise we silently catch so the page doesn't error.
+    _roastAudio.play().catch(() => _markSpeaking(false));
 }
 
 function speakRoastManual() {
@@ -416,9 +413,6 @@ liveToggle.addEventListener('change', () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────────────
-// Load voices (Chrome needs a user gesture or slight delay)
-if (synth && synth.onvoiceschanged !== undefined) synth.onvoiceschanged = () => {};
-
 setInterval(updateDashboard, 2000);
 updateDashboard();
 updateCalendar();
