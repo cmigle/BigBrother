@@ -8,6 +8,7 @@ AI coach for contextual roasts.
 
 import time
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -47,6 +48,11 @@ class CalendarSync:
         self._tasks_cache: List[Dict[str, Any]] = []       # Google Tasks
         self._last_refresh: float = 0
         self._authenticated = False
+        # googleapiclient's httplib2 transport is NOT thread-safe — concurrent
+        # API calls on the same _service raise SSL WRONG_VERSION_NUMBER /
+        # DECRYPTION_FAILED. This lock serializes every request that touches
+        # _service or _tasks_service.
+        self._api_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Authentication
@@ -151,13 +157,14 @@ class CalendarSync:
         end_of_day = start_of_day + timedelta(days=1)
 
         try:
-            result = self._service.events().list(
-                calendarId=self.calendar_id,
-                timeMin=start_of_day.isoformat(),
-                timeMax=end_of_day.isoformat(),
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
+            with self._api_lock:
+                result = self._service.events().list(
+                    calendarId=self.calendar_id,
+                    timeMin=start_of_day.isoformat(),
+                    timeMax=end_of_day.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                ).execute()
 
             events = []
             for item in result.get("items", []):
@@ -187,13 +194,14 @@ class CalendarSync:
         start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end   = start + timedelta(days=1)
         try:
-            result = self._service.events().list(
-                calendarId=self.calendar_id,
-                timeMin=start.isoformat(),
-                timeMax=end.isoformat(),
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
+            with self._api_lock:
+                result = self._service.events().list(
+                    calendarId=self.calendar_id,
+                    timeMin=start.isoformat(),
+                    timeMax=end.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                ).execute()
             self._tomorrow_cache = [
                 {
                     "id": e.get("id"),
@@ -231,16 +239,18 @@ class CalendarSync:
                 hour=0, minute=0, second=0, microsecond=0
             )
 
-            task_lists = self._tasks_service.tasklists().list(maxResults=10).execute()
+            with self._api_lock:
+                task_lists = self._tasks_service.tasklists().list(maxResults=10).execute()
             tasks: List[Dict[str, Any]] = []
             for tl in task_lists.get("items", []):
                 tl_id = tl["id"]
-                result = self._tasks_service.tasks().list(
-                    tasklist=tl_id,
-                    showCompleted=False,
-                    dueMax=week_end.isoformat(),
-                    maxResults=30,
-                ).execute()
+                with self._api_lock:
+                    result = self._tasks_service.tasks().list(
+                        tasklist=tl_id,
+                        showCompleted=False,
+                        dueMax=week_end.isoformat(),
+                        maxResults=30,
+                    ).execute()
                 for item in result.get("items", []):
                     if item.get("status") == "completed":
                         continue
@@ -262,11 +272,21 @@ class CalendarSync:
             return self._tasks_cache
 
     def _maybe_refresh(self):
-        """Refresh events (today + tomorrow) and tasks if the cache is stale."""
-        if time.time() - self._last_refresh > self.refresh_interval:
-            self.fetch_events()          # populates _events_cache (today)
-            self.fetch_tomorrow_events() # populates _tomorrow_cache
-            self.fetch_tasks()           # populates _tasks_cache
+        """Refresh events (today + tomorrow) and tasks if the cache is stale.
+
+        Hot path (cache fresh) avoids the lock entirely so dashboard polls
+        that just read cached data don't queue behind one another. Only
+        when a refresh is actually needed do we take the lock and re-check
+        under it to avoid two callers both refreshing."""
+        if time.time() - self._last_refresh <= self.refresh_interval:
+            return
+        with self._api_lock:
+            # Re-check under the lock: another thread may have refreshed
+            # while we were waiting.
+            if time.time() - self._last_refresh > self.refresh_interval:
+                self.fetch_events()          # populates _events_cache (today)
+                self.fetch_tomorrow_events() # populates _tomorrow_cache
+                self.fetch_tasks()           # populates _tasks_cache
 
     def get_today_events(self) -> List[Dict[str, Any]]:
         """Get today's events (cached, auto-refreshing)."""
@@ -335,13 +355,14 @@ class CalendarSync:
                                              target_date.day, tzinfo=timezone.utc)
                         start = target_dt
                         end   = target_dt + timedelta(days=1)
-                        result = self._service.events().list(
-                            calendarId=self.calendar_id,
-                            timeMin=start.isoformat(),
-                            timeMax=end.isoformat(),
-                            singleEvents=True,
-                            orderBy="startTime",
-                        ).execute()
+                        with self._api_lock:
+                            result = self._service.events().list(
+                                calendarId=self.calendar_id,
+                                timeMin=start.isoformat(),
+                                timeMax=end.isoformat(),
+                                singleEvents=True,
+                                orderBy="startTime",
+                            ).execute()
                         day_events = [
                             {"summary": e.get("summary", ""),
                              "start": e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
@@ -419,16 +440,22 @@ class CalendarSync:
             return False
 
         try:
-            event = self._service.events().get(
-                calendarId=self.calendar_id, eventId=event_id
-            ).execute()
+            with self._api_lock:
+                event = self._service.events().get(
+                    calendarId=self.calendar_id, eventId=event_id
+                ).execute()
 
-            event["colorId"] = "11"  # Green in Google Calendar
-            event["summary"] = "✅ " + event.get("summary", "")
+                event["colorId"] = "11"  # Green in Google Calendar
+                # Prefix marker so we can recognise completed events on reload.
+                # Plain text instead of an emoji so the title reads cleanly in
+                # the native Google Calendar UI too.
+                summary = event.get("summary", "")
+                if not summary.startswith("[done]"):
+                    event["summary"] = "[done] " + summary
 
-            self._service.events().update(
-                calendarId=self.calendar_id, eventId=event_id, body=event
-            ).execute()
+                self._service.events().update(
+                    calendarId=self.calendar_id, eventId=event_id, body=event
+                ).execute()
 
             logger.info("Marked event %s as complete", event_id)
 

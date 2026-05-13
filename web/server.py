@@ -12,6 +12,7 @@ from io import BytesIO
 from typing import Optional
 
 import cv2
+import numpy as np
 from flask import (
     Flask, render_template, jsonify, request, Response, send_from_directory,
 )
@@ -102,6 +103,7 @@ def api_status():
             on_cooldown = _scare.is_on_cooldown()
 
         latest_roast = _coach.get_latest_roast() if _coach else ""
+        latest_roast_id = getattr(_coach, "roast_id", 0) if _coach else 0
         latest_guess = _coach.get_guess() if _coach else ""
 
         # Process / browser distraction
@@ -125,11 +127,13 @@ def api_status():
         "kill_count_today": today.get("kill_count", 0),
         "current_streak": round(streak, 1),
         "latest_roast": latest_roast,
+        "latest_roast_id": latest_roast_id,
         "latest_guess": latest_guess,
         "distraction_detected": distraction_detected,
         "distraction_label":    distraction_label,
         "distraction_source":   distraction_source,
         "distraction_duration": distraction_duration,
+        "camera_enabled":      bool(_detector.enabled) if _detector else False,
     })
 
 
@@ -215,18 +219,124 @@ def api_roast_speak():
     return jsonify({"success": True, "roast": roast})
 
 
+# In-memory MP3 cache keyed by (voice, rate, pitch, volume, text) so repeated
+# dashboard polls don't re-render the same roast. Hard cap so we don't leak.
+_TTS_CACHE: dict = {}
+_TTS_CACHE_MAX = 32
+_TTS_LOCK = threading.Lock()
+
+# Voice rotation. edge-tts voices are inherently TTS-flat, so the way to
+# fight monotony is variety, not louder prosody. Each roast picks a voice
+# deterministically from its roast_id so the same roast always renders the
+# same way (so the MP3 cache hits) but a sequence of roasts cycles voices.
+#
+# Each tuple: (voice, rate, pitch, volume). Hand-tuned by ear.
+_VOICE_ROTATION = [
+    # Brian: most expressive of the US set, slight rasp
+    ("en-US-BrianNeural",              "+10%", "-3Hz",  "+30%"),
+    # Ryan: British sneer, very different rhythm — breaks monotony hard
+    ("en-GB-RyanNeural",               "+5%",  "-3Hz",  "+30%"),
+    # Andrew: deep authoritative news-anchor, lands the longer cinema lines
+    ("en-US-AndrewMultilingualNeural", "+10%", "-5Hz",  "+30%"),
+]
+_VOICE_DEFAULT  = _VOICE_ROTATION[0][0]
+_RATE_DEFAULT   = _VOICE_ROTATION[0][1]
+_PITCH_DEFAULT  = _VOICE_ROTATION[0][2]
+_VOLUME_DEFAULT = _VOICE_ROTATION[0][3]
+
+
+def _pick_voice(roast_id: int) -> tuple:
+    """Deterministically rotate voices by roast_id so the audio for a given
+    roast is stable (cacheable) but a series of roasts cycles voices."""
+    return _VOICE_ROTATION[roast_id % len(_VOICE_ROTATION)]
+
+
+def _render_edge_tts(
+    text: str,
+    voice: str = _VOICE_DEFAULT,
+    rate: str = _RATE_DEFAULT,
+    pitch: str = _PITCH_DEFAULT,
+    volume: str = _VOLUME_DEFAULT,
+) -> Optional[bytes]:
+    """Synchronously render `text` to MP3 bytes via edge-tts. Cached."""
+    key = (voice, rate, pitch, volume, text)
+    with _TTS_LOCK:
+        if key in _TTS_CACHE:
+            return _TTS_CACHE[key]
+    try:
+        import asyncio, edge_tts
+        async def _do():
+            comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, volume=volume)
+            chunks = bytearray()
+            async for ev in comm.stream():
+                if ev.get("type") == "audio":
+                    chunks.extend(ev["data"])
+            return bytes(chunks)
+        loop = asyncio.new_event_loop()
+        try:
+            mp3 = loop.run_until_complete(_do())
+        finally:
+            loop.close()
+    except Exception as exc:
+        logger.error("edge-tts render failed: %s", exc)
+        return None
+    with _TTS_LOCK:
+        if len(_TTS_CACHE) >= _TTS_CACHE_MAX:
+            _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+        _TTS_CACHE[key] = mp3
+    return mp3
+
+
+@app.route("/api/roast/audio")
+def api_roast_audio():
+    """Return the latest roast as MP3 audio for browser playback.
+
+    The dashboard polls /api/status and discovers a new roast; it then loads
+    /api/roast/audio?text=<roast-text> and plays the MP3. Caching is keyed on
+    (voice, rate, pitch, volume, text) so the same roast is rendered once."""
+    text = request.args.get("text", "").strip()
+    if not text and _coach is not None:
+        text = _coach.get_latest_roast()
+    if not text:
+        return jsonify({"error": "No text"}), 404
+
+    # Voice rotation: if the caller specifies a voice explicitly, honour it;
+    # otherwise pick by roast_id (or by text hash as a fallback so manual
+    # ▶ SPEAK on the same roast gets the same voice every time).
+    if "voice" in request.args:
+        voice  = request.args.get("voice",  _VOICE_DEFAULT)
+        rate   = request.args.get("rate",   _RATE_DEFAULT)
+        pitch  = request.args.get("pitch",  _PITCH_DEFAULT)
+        volume = request.args.get("volume", _VOLUME_DEFAULT)
+    else:
+        rid = getattr(_coach, "roast_id", 0) if _coach else 0
+        # If the text matches the current roast, use roast_id. Otherwise
+        # derive a stable rotation slot from the text itself so a re-render
+        # of an old roast always sounds the same.
+        if _coach and text == _coach.get_latest_roast():
+            slot = rid
+        else:
+            slot = hash(text) & 0x7fffffff
+        voice, rate, pitch, volume = _pick_voice(slot)
+    mp3 = _render_edge_tts(text, voice, rate, pitch, volume)
+    if mp3 is None:
+        return jsonify({"error": "TTS render failed"}), 500
+    return Response(mp3, mimetype="audio/mpeg")
+
+
 @app.route("/api/guess")
 def api_guess():
-    """Educated guess about what the user should be doing (no calendar event)."""
+    """Educated guess about what the user should be doing.
+
+    Calendar-aware: when a current event is active the guess names it; when
+    one is starting soon it mentions the runway; otherwise it falls back to
+    time-of-day phrasing. The coach handles all that internally now."""
     if _coach is None:
         return jsonify({"guess": "You should be working. Obviously."}), 200
-    # Check if there's a current event — only generate guess if nothing scheduled
     has_event = False
     if _calendar and _calendar.is_authenticated:
-        ev = _calendar.get_current_event()
-        has_event = ev is not None
-    guess = _coach.generate_guess() if not has_event else ""
-    return jsonify({"guess": guess, "has_current_event": has_event})
+        has_event = _calendar.get_current_event() is not None
+    return jsonify({"guess": _coach.generate_guess(), "has_current_event": has_event})
 
 
 @app.route("/api/cameras")
@@ -242,7 +352,13 @@ def api_cameras():
 def api_settings():
     """Get or update settings."""
     if request.method == "GET":
-        return jsonify(_config)
+        payload = dict(_config)
+        payload["camera_enabled"] = bool(_detector.enabled) if _detector else True
+        # Surface strict_mode at the top level for the settings UI. It's also
+        # under detection.* in the config dict, but the settings page reads
+        # flat fields elsewhere — keep it consistent.
+        payload["strict_mode"] = bool(getattr(_detector, "strict_mode", False)) if _detector else False
+        return jsonify(payload)
 
     data = request.get_json()
     if not data:
@@ -259,11 +375,17 @@ def api_settings():
         _scare.update_settings(escalation_enabled=bool(data["escalation_enabled"]))
     if "filter_screens" in data and _detector:
         _detector.update_settings(filter_screens=bool(data["filter_screens"]))
+    if "strict_mode" in data and _detector:
+        _detector.update_settings(strict_mode=bool(data["strict_mode"]))
     if "camera_index" in data and _detector:
         new_cam = int(data["camera_index"])
         if new_cam != _detector.camera_index:
             import threading as _t
             _t.Thread(target=_detector.switch_camera, args=(new_cam,), daemon=True).start()
+    if "camera_enabled" in data and _detector:
+        want = bool(data["camera_enabled"])
+        if want != bool(_detector.enabled):
+            threading.Thread(target=_detector.set_enabled, args=(want,), daemon=True).start()
     if "pm_enabled" in data and _process_monitor:
         _process_monitor.update_settings(enabled=bool(data["pm_enabled"]))
     if "pm_check_web" in data and _process_monitor:
@@ -278,28 +400,84 @@ def api_settings():
 # Camera feed (MJPEG stream)
 # ======================================================================
 
+_OFF_PLACEHOLDER_JPEG: Optional[bytes] = None
+
+
+def _get_off_placeholder() -> bytes:
+    """Return a cached 'camera off' JPEG so the MJPEG stream stays alive
+    even when the detector is disabled. Without this, the <img> tag holds
+    a stale first-frame because no new boundary ever arrives."""
+    global _OFF_PLACEHOLDER_JPEG
+    if _OFF_PLACEHOLDER_JPEG is None:
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        img[:] = (20, 20, 20)  # near-black
+        cv2.putText(img, "CAMERA OFF", (170, 195),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.4, (90, 90, 90), 2, cv2.LINE_AA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        _OFF_PLACEHOLDER_JPEG = buf.tobytes() if ok else b""
+    return _OFF_PLACEHOLDER_JPEG
+
+
 def _generate_mjpeg():
-    """Generator that yields MJPEG frames from the detector."""
+    """Generator yielding multipart MJPEG frames for the browser.
+
+    The format here matters more than you'd think — Chromium tiles partial
+    frames in a 3×3 grid when it loses track of part boundaries, and a
+    missing Content-Length on a payload that happens to contain the
+    boundary token can trip it. We always include Content-Length and we
+    never sleep without yielding so the parser doesn't desync.
+    """
+    BOUNDARY = b"--frame\r\n"
+    last_frame_id: int = -1
+
     while True:
         frame = None
-        if _detector is not None:
+        if _detector is not None and _detector.enabled:
             frame = _detector.get_annotated_frame()
 
-        if frame is None:
-            time.sleep(0.1)
-            continue
+        # Validate the frame before handing it to imencode. A wrong-shape
+        # or non-uint8 buffer (e.g. greyscale, partially-written, or YUV
+        # left over from a backend hiccup) can encode into a gray JPEG.
+        valid = (
+            frame is not None
+            and getattr(frame, "ndim", 0) == 3
+            and frame.shape[2] == 3
+            and frame.dtype == np.uint8
+        )
 
-        ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        if not ret:
-            continue
+        if not valid:
+            jpeg_bytes = _get_off_placeholder()
+            this_id = -1  # placeholder uses a sentinel id
+        else:
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ok:
+                jpeg_bytes = _get_off_placeholder()
+                this_id = -1
+            else:
+                jpeg_bytes = buf.tobytes()
+                # id() of the numpy array is stable while the array is alive
+                # and changes when the detector replaces _latest_frame, so we
+                # can use it as a cheap "is this a new frame?" signal.
+                this_id = id(frame)
 
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + jpeg.tobytes()
+        # If nothing new has happened, sleep briefly without emitting —
+        # but only for a short window so the browser's MJPEG parser stays
+        # warm. After the window we re-emit the same frame to keep the
+        # connection alive (important when the camera is off and the
+        # placeholder is the only thing to send).
+        if this_id == last_frame_id:
+            time.sleep(0.066)
+            continue
+        last_frame_id = this_id
+
+        header = (
+            BOUNDARY
+            + b"Content-Type: image/jpeg\r\n"
+            + b"Content-Length: " + str(len(jpeg_bytes)).encode("ascii") + b"\r\n"
             + b"\r\n"
         )
-        time.sleep(0.066)  # ~15 FPS
+        yield header + jpeg_bytes + b"\r\n"
+        time.sleep(0.066)  # ~15 FPS cap
 
 
 @app.route("/api/camera/feed")

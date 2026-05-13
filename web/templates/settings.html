@@ -11,6 +11,13 @@
         <div class="settings-section">
             <h2 class="section-title">Camera</h2>
             <div class="setting-row">
+                <label for="camera-enabled">Camera On</label>
+                <label class="toggle">
+                    <input type="checkbox" id="camera-enabled" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
                 <label for="camera-select">Active Camera</label>
                 <select id="camera-select" style="background:var(--bg-input);border:1px solid var(--border);color:var(--fg);padding:6px 10px;font-family:var(--font);font-size:0.84rem;border-radius:var(--radius);flex:1;max-width:320px;outline:none;cursor:pointer;">
                     <option value="">Scanning…</option>
@@ -37,6 +44,17 @@
                 <label for="min-duration">Min Duration (seconds)</label>
                 <input type="number" id="min-duration" min="0.5" max="10" step="0.5" value="2.0">
             </div>
+            <div class="setting-row">
+                <label for="strict-mode">Strict Mode</label>
+                <label class="toggle">
+                    <input type="checkbox" id="strict-mode">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <p class="setting-desc">
+                Fire on any visible phone, even when sitting on the desk.
+                Off (default): only fire when the phone is being held / moved.
+            </p>
         </div>
 
         <!-- Scare System -->
@@ -161,11 +179,19 @@ fetch('/api/cameras')
 fetch('/api/settings')
     .then(r => r.json())
     .then(data => {
+        if (typeof data.camera_enabled === 'boolean') {
+            document.getElementById('camera-enabled').checked = data.camera_enabled;
+        }
         if (data.detection) {
             confSlider.value = data.detection.confidence_threshold || 0.5;
             confVal.textContent = parseFloat(confSlider.value).toFixed(2);
             document.getElementById('min-duration').value = data.detection.min_duration || 2.0;
             document.getElementById('filter-screens').checked = data.detection.filter_screens !== false;
+        }
+        // strict_mode is published at the top level of /api/settings (mirrors
+        // the live detector flag) rather than under detection.* — read it here.
+        if (typeof data.strict_mode === 'boolean') {
+            document.getElementById('strict-mode').checked = data.strict_mode;
         }
         if (data.scare) {
             volSlider.value = data.scare.volume || 1.0;
@@ -198,7 +224,9 @@ document.getElementById('settings-form').addEventListener('submit', function(e) 
         cooldown_seconds: parseInt(document.getElementById('cooldown').value),
         escalation_enabled: document.getElementById('escalation').checked,
         filter_screens: document.getElementById('filter-screens').checked,
+        strict_mode: document.getElementById('strict-mode').checked,
         camera_index: parseInt(camSelect.value) || 0,
+        camera_enabled: document.getElementById('camera-enabled').checked,
         pm_enabled:   document.getElementById('pm-enabled').checked,
         pm_check_web: document.getElementById('pm-web').checked,
         pm_check_apps: document.getElementById('pm-apps').checked,

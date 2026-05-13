@@ -59,6 +59,7 @@ class PhoneDetector:
         filter_screens: bool = True,
         screen_overlap_threshold: float = 0.4,
         max_phone_area_fraction: float = 0.20,
+        strict_mode: bool = False,
     ):
         """
         filter_screens: suppress phone detections that overlap with
@@ -88,6 +89,11 @@ class PhoneDetector:
         self.filter_screens = filter_screens
         self.screen_overlap_threshold = screen_overlap_threshold
         self.max_phone_area_fraction = max_phone_area_fraction
+        # Strict mode: when True, the held-vs-on-table motion check is bypassed
+        # and ANY visible phone fires the scare. The on-table classification
+        # was originally added so a phone left on the desk wasn't constantly
+        # shooting at the user — strict mode opts out of that lenience.
+        self.strict_mode = strict_mode
 
         # ── Motion-based active-use detection ────────────────────────────
         # Strategy: track the phone's centroid (cx, cy) over a rolling time
@@ -106,6 +112,15 @@ class PhoneDetector:
         self._motion_window: float = 2.5
         self._motion_threshold: float = 35.0
         self._motion_grace: float = 2.0
+        # Detection-loss tolerance: if YOLO misses the phone for fewer than
+        # this many seconds, we keep treating it as present (using the last
+        # known bbox). At 15 FPS this absorbs 30+ dropped frames before we
+        # admit the phone is really gone — gets rid of the "timer keeps
+        # resetting" feel during testing. Setting this to 0 disables it.
+        self._loss_tolerance: float = 2.0
+        self._last_seen_time: Optional[float] = None
+        self._last_known_box: Optional[Tuple[int, int, int, int]] = None
+        self._last_known_conf: float = 0.0
         # Rolling buffer of (timestamp, cx, cy)
         self._centroid_history: Deque[Tuple[float, float, float]] = collections.deque()
         self._phone_first_seen: Optional[float] = None  # time phone first appeared
@@ -120,6 +135,7 @@ class PhoneDetector:
         self._cap: Optional[cv2.VideoCapture] = None
         self._switch_lock = __import__('threading').Lock()
         self._pending_camera_index: Optional[int] = None
+        self.enabled: bool = True  # Master on/off — when False, camera is released and frames are not grabbed
 
         logger.info(
             "PhoneDetector initialized — model=%s  conf=%.2f  cam=%d  filter_screens=%s",
@@ -168,7 +184,13 @@ class PhoneDetector:
 
     def open_camera(self) -> bool:
         """Open the webcam and apply calibration settings. Returns True on success."""
-        self._cap = cv2.VideoCapture(self.camera_index)
+        # On Windows, MSMF (the default) sometimes opens the device but then
+        # returns -1072873821 (MF_E_HW_MFT_FAILED_START_STREAMING) on every
+        # grabFrame, leaving the feed stuck on a single frame. DirectShow is
+        # what list_cameras already uses successfully — match it here.
+        import sys
+        backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        self._cap = cv2.VideoCapture(self.camera_index, backend)
         if not self._cap.isOpened():
             logger.error("Could not open camera index %d", self.camera_index)
             return False
@@ -224,13 +246,41 @@ class PhoneDetector:
 
 
     def grab_frame(self) -> Optional[np.ndarray]:
-        """Read a single frame from the webcam. Returns None on failure."""
+        """Read a single frame from the webcam. Returns None on failure or when disabled."""
+        if not self.enabled:
+            return None
         if self._cap is None or not self._cap.isOpened():
             return None
         ret, frame = self._cap.read()
         if not ret:
             return None
         return frame
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """
+        Master on/off. When disabled, release the webcam handle so other
+        apps can use it. When re-enabled, reopen the camera.
+        Returns True if the state change succeeded.
+        """
+        with self._switch_lock:
+            if enabled == self.enabled:
+                return True
+            if enabled:
+                logger.info("Camera ENABLED — reopening index %d", self.camera_index)
+                self.enabled = True
+                # Reset detection state so a stale "phone visible" doesn't fire on resume
+                self._latest_result = None
+                self._latest_frame = None
+                self._phone_detected = False
+                self._actively_on_phone = False
+                return self.open_camera()
+            else:
+                logger.info("Camera DISABLED — releasing webcam")
+                self.enabled = False
+                self.release_camera()
+                self._latest_result = None
+                self._latest_frame = None
+                return True
 
     # ------------------------------------------------------------------
     # Detection
@@ -341,7 +391,50 @@ class PhoneDetector:
 
         # Update detection state
         now = time.time()
-        detected = best_conf > 0
+        real_detection = best_conf > 0
+        used_remembered_box = False
+
+        # ── Detection-loss tolerance ─────────────────────────────────────
+        # YOLO occasionally drops a frame: confidence noise, motion blur, an
+        # arm momentarily covering the phone. Without this, every miss resets
+        # the "phone visible for N seconds" timer and the scare never fires.
+        # When we miss but recently HAD a real detection, pretend the phone
+        # is still where it was. Don't extend the centroid history (a frozen
+        # position would skew motion calculations); just keep the state.
+        if real_detection:
+            self._last_seen_time = now
+            self._last_known_box = best_box
+            self._last_known_conf = best_conf
+            detected = True
+        elif (
+            self._loss_tolerance > 0
+            and self._last_seen_time is not None
+            and self._last_known_box is not None
+            and (now - self._last_seen_time) <= self._loss_tolerance
+        ):
+            # Reuse the remembered detection for this frame only.
+            detected = True
+            used_remembered_box = True
+            best_box = self._last_known_box
+            best_conf = self._last_known_conf
+            # Draw a faded outline + "tracking…" label so it's obvious during
+            # testing that we're inside the grace window.
+            x1, y1, x2, y2 = best_box
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 100, 180), 1)
+            cv2.putText(
+                annotated, f"tracking {now - self._last_seen_time:.1f}s",
+                (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 100, 180), 1,
+            )
+        else:
+            detected = False
+            # Memory expired — clear it so a future detection counts as fresh.
+            if (
+                self._last_seen_time is not None
+                and (now - self._last_seen_time) > self._loss_tolerance
+            ):
+                self._last_seen_time = None
+                self._last_known_box = None
+                self._last_known_conf = 0.0
 
         # ── Motion-based active-use detection ────────────────────────────
         # Track the phone centroid over time. Stationary = on desk (passive).
@@ -357,8 +450,11 @@ class PhoneDetector:
             if self._phone_first_seen is None:
                 self._phone_first_seen = now
 
-            # Append to rolling centroid history
-            self._centroid_history.append((now, cx, cy))
+            # Only append to centroid history on REAL detections. A remembered
+            # box is a frozen position; appending it would fake "stationary"
+            # readings and could falsely classify a moving phone as on-desk.
+            if not used_remembered_box:
+                self._centroid_history.append((now, cx, cy))
 
             # Purge entries older than the motion window
             cutoff = now - self._motion_window
@@ -369,7 +465,10 @@ class PhoneDetector:
             # moment (before the phone has settled) always fires.
             in_grace = (now - self._phone_first_seen) < self._motion_grace
 
-            if in_grace:
+            if self.strict_mode:
+                # Strict: any visible phone counts. Skip the motion check.
+                active = True
+            elif in_grace:
                 active = True
             elif len(self._centroid_history) >= 2:
                 # Compute max displacement across the history window
@@ -383,7 +482,10 @@ class PhoneDetector:
 
             # Draw motion indicator on feed
             status_color = (0, 80, 255) if active else (0, 180, 0)
-            status_text  = "HELD" if active else "on desk"
+            if self.strict_mode:
+                status_text = "STRICT"
+            else:
+                status_text = "HELD" if active else "on desk"
             cv2.putText(annotated, status_text, (best_box[0], best_box[3] + 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 2)
         else:
@@ -465,6 +567,7 @@ class PhoneDetector:
         max_phone_area_fraction: Optional[float] = None,
         motion_threshold: Optional[float] = None,
         motion_window: Optional[float] = None,
+        strict_mode: Optional[bool] = None,
     ):
         """Hot-update detection settings without recreating the detector."""
         if confidence is not None:
@@ -486,3 +589,6 @@ class PhoneDetector:
         if motion_window is not None:
             self._motion_window = motion_window
             logger.info("motion_window updated to %.1f s", motion_window)
+        if strict_mode is not None:
+            self.strict_mode = strict_mode
+            logger.info("strict_mode updated to %s", strict_mode)

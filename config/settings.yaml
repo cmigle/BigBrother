@@ -9,6 +9,9 @@ detection:
   filter_screens: true
   screen_overlap_threshold: 0.4   # IoU fraction — lower = stricter suppression
   max_phone_area_fraction: 0.20   # Bboxes > 20% of frame area treated as tablets
+  # Strict mode: fire on any visible phone, even when sitting on the desk.
+  # Off = motion-gated (only held/moving phones trigger the scare).
+  strict_mode: false
 
 # Camera calibration — leave a value as null to keep the driver default.
 # Run `python main.py --list-cameras` to see available camera indices.
@@ -39,18 +42,20 @@ ai_coach:
   ollama_model: "llama3"
   ollama_url: "http://localhost:11434"
   tts_enabled: true
-  tts_engine: "pyttsx3"
+  tts_engine: "edge-tts"
   fallback_roasts: "config/roasts.yaml"
 
 hardware:
   serial_enabled: false
   serial_port: "COM3"
   baud_rate: 9600
-  # WiFi trigger — set wifi_enabled: true and point arduino_url at the ESP32's IP.
-  # The server must be running and reachable on the same network.
-  # Example: arduino_url: "http://192.168.1.42"
+  # WiFi trigger — set wifi_enabled: true and point arduino_url at the ESP32.
+  # The ESP32 publishes itself as servo.local via mDNS; on Windows 11 native
+  # name resolution handles .local without Bonjour. If that ever stops
+  # working (different network, no mDNS responder), check the router DHCP
+  # table for the device and replace with the raw IP (e.g. http://10.0.0.42).
   wifi_enabled: true
-  arduino_url: "http://192.168.1.101"
+  arduino_url: "http://servo.local"
 
 calendar:
   enabled: true

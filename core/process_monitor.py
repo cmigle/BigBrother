@@ -132,6 +132,11 @@ if _IS_WINDOWS:
         ctypes.c_int,
     ]
     _user32.IsWindowVisible.restype = ctypes.wintypes.BOOL
+    _user32.GetWindowThreadProcessId.restype  = ctypes.wintypes.DWORD
+    _user32.GetWindowThreadProcessId.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+    ]
     _EnumWindowsProc = ctypes.WINFUNCTYPE(
         ctypes.wintypes.BOOL,
         ctypes.wintypes.HWND,
@@ -139,35 +144,40 @@ if _IS_WINDOWS:
     )
 
 
-def _get_all_window_titles() -> List[str]:
-    """Return titles of all currently visible top-level windows."""
+def _enumerate_visible_windows() -> List[Tuple[str, int]]:
+    """Return (title, pid) pairs for every visible top-level window with a
+    non-empty title. We require a title because tray-only processes spawn
+    invisible hidden windows that satisfy IsWindowVisible but have no text."""
     if not _IS_WINDOWS:
         return []
-    titles: List[str] = []
+    results: List[Tuple[str, int]] = []
 
     def _cb(hwnd, _param):
         if _user32.IsWindowVisible(hwnd):
             buf = ctypes.create_unicode_buffer(512)
             _user32.GetWindowTextW(hwnd, buf, 512)
-            if buf.value:
-                titles.append(buf.value)
+            title = buf.value
+            if title:
+                pid = ctypes.wintypes.DWORD()
+                _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                results.append((title, int(pid.value)))
         return True
 
     _user32.EnumWindows(_EnumWindowsProc(_cb), 0)
-    return titles
+    return results
 
 
-def _running_process_names() -> List[str]:
-    """Return lowercase exe names of every running process."""
-    names: List[str] = []
-    for proc in psutil.process_iter(["name"]):
+def _running_processes() -> List[Tuple[str, int]]:
+    """Return (lowercase exe name, pid) for every running process."""
+    out: List[Tuple[str, int]] = []
+    for proc in psutil.process_iter(["name", "pid"]):
         try:
             name = (proc.info["name"] or "").lower()
             if name:
-                names.append(name)
+                out.append((name, int(proc.info["pid"])))
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    return names
+    return out
 
 
 # ── Main class ───────────────────────────────────────────────────────────────
@@ -286,10 +296,13 @@ class ProcessMonitor:
     def _poll(self) -> DistractionResult:
         """One scan pass — returns a fresh DistractionResult."""
 
+        # Enumerate visible windows once so both checks can use it.
+        visible = _enumerate_visible_windows() if _IS_WINDOWS else []
+        visible_pids = {pid for _t, pid in visible}
+
         # ── 1. Browser-tab check via window titles ─────────────────
         if self.check_web:
-            titles = _get_all_window_titles()
-            for title in titles:
+            for title, _pid in visible:
                 title_lower = title.lower()
                 for pattern, label in self._web_patterns.items():
                     if pattern in title_lower:
@@ -302,19 +315,26 @@ class ProcessMonitor:
                             timestamp=time.time(),
                         )
 
-        # ── 2. Process name check ──────────────────────────────────
+        # ── 2. Process check, gated on visible window ──────────────
+        # Apps like Discord, Steam and Spotify minimise to the system tray
+        # and keep their .exe running — we only want to flag them when
+        # the user actually has a window open. Match by process name AND
+        # require the PID to own at least one visible top-level window.
         if self.check_apps:
-            names = _running_process_names()
-            for proc_name in names:
-                if proc_name in self._app_patterns:
-                    label = self._app_patterns[proc_name]
-                    logger.debug("App distraction: process '%s' → '%s'", proc_name, label)
-                    return DistractionResult(
-                        detected=True,
-                        label=label,
-                        source="app",
-                        raw_title=proc_name,
-                        timestamp=time.time(),
-                    )
+            for proc_name, pid in _running_processes():
+                if proc_name not in self._app_patterns:
+                    continue
+                if _IS_WINDOWS and pid not in visible_pids:
+                    continue  # backgrounded / tray-only — ignore
+                label = self._app_patterns[proc_name]
+                logger.debug("App distraction: process '%s' (pid=%d) → '%s'",
+                             proc_name, pid, label)
+                return DistractionResult(
+                    detected=True,
+                    label=label,
+                    source="app",
+                    raw_title=proc_name,
+                    timestamp=time.time(),
+                )
 
         return DistractionResult(detected=False, timestamp=time.time())
