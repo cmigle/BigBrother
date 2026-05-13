@@ -216,6 +216,10 @@ def init_modules(config: dict):
         camera_index=det_cfg["camera_index"],
         roi=roi,
         calibration=calibration,
+        filter_screens=det_cfg.get("filter_screens", True),
+        screen_overlap_threshold=det_cfg.get("screen_overlap_threshold", 0.4),
+        max_phone_area_fraction=det_cfg.get("max_phone_area_fraction", 0.20),
+        strict_mode=det_cfg.get("strict_mode", False),
     )
 
     return {

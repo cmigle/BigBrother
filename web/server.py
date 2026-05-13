@@ -354,6 +354,10 @@ def api_settings():
     if request.method == "GET":
         payload = dict(_config)
         payload["camera_enabled"] = bool(_detector.enabled) if _detector else True
+        # Surface strict_mode at the top level for the settings UI. It's also
+        # under detection.* in the config dict, but the settings page reads
+        # flat fields elsewhere — keep it consistent.
+        payload["strict_mode"] = bool(getattr(_detector, "strict_mode", False)) if _detector else False
         return jsonify(payload)
 
     data = request.get_json()
@@ -371,6 +375,8 @@ def api_settings():
         _scare.update_settings(escalation_enabled=bool(data["escalation_enabled"]))
     if "filter_screens" in data and _detector:
         _detector.update_settings(filter_screens=bool(data["filter_screens"]))
+    if "strict_mode" in data and _detector:
+        _detector.update_settings(strict_mode=bool(data["strict_mode"]))
     if "camera_index" in data and _detector:
         new_cam = int(data["camera_index"])
         if new_cam != _detector.camera_index:

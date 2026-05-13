@@ -590,6 +590,17 @@ body {
 }
 .setting-row label:first-child { min-width: 180px; font-size: 0.84rem; color: var(--fg-white); opacity: 0.75; }
 
+/* Helper text under a setting-row that explains a non-obvious toggle. */
+.setting-desc {
+    margin-top: 0.4rem;
+    margin-bottom: 0.6rem;
+    padding-left: 0.1rem;
+    font-size: 0.78rem;
+    color: var(--fg-dim);
+    line-height: 1.5;
+    max-width: 520px;
+}
+
 .setting-row input[type="range"] { flex: 1; accent-color: var(--green); cursor: pointer; }
 
 .setting-row input[type="number"],

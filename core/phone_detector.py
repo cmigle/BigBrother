@@ -59,6 +59,7 @@ class PhoneDetector:
         filter_screens: bool = True,
         screen_overlap_threshold: float = 0.4,
         max_phone_area_fraction: float = 0.20,
+        strict_mode: bool = False,
     ):
         """
         filter_screens: suppress phone detections that overlap with
@@ -88,6 +89,11 @@ class PhoneDetector:
         self.filter_screens = filter_screens
         self.screen_overlap_threshold = screen_overlap_threshold
         self.max_phone_area_fraction = max_phone_area_fraction
+        # Strict mode: when True, the held-vs-on-table motion check is bypassed
+        # and ANY visible phone fires the scare. The on-table classification
+        # was originally added so a phone left on the desk wasn't constantly
+        # shooting at the user — strict mode opts out of that lenience.
+        self.strict_mode = strict_mode
 
         # ── Motion-based active-use detection ────────────────────────────
         # Strategy: track the phone's centroid (cx, cy) over a rolling time
@@ -459,7 +465,10 @@ class PhoneDetector:
             # moment (before the phone has settled) always fires.
             in_grace = (now - self._phone_first_seen) < self._motion_grace
 
-            if in_grace:
+            if self.strict_mode:
+                # Strict: any visible phone counts. Skip the motion check.
+                active = True
+            elif in_grace:
                 active = True
             elif len(self._centroid_history) >= 2:
                 # Compute max displacement across the history window
@@ -473,7 +482,10 @@ class PhoneDetector:
 
             # Draw motion indicator on feed
             status_color = (0, 80, 255) if active else (0, 180, 0)
-            status_text  = "HELD" if active else "on desk"
+            if self.strict_mode:
+                status_text = "STRICT"
+            else:
+                status_text = "HELD" if active else "on desk"
             cv2.putText(annotated, status_text, (best_box[0], best_box[3] + 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, status_color, 2)
         else:
@@ -555,6 +567,7 @@ class PhoneDetector:
         max_phone_area_fraction: Optional[float] = None,
         motion_threshold: Optional[float] = None,
         motion_window: Optional[float] = None,
+        strict_mode: Optional[bool] = None,
     ):
         """Hot-update detection settings without recreating the detector."""
         if confidence is not None:
@@ -576,3 +589,6 @@ class PhoneDetector:
         if motion_window is not None:
             self._motion_window = motion_window
             logger.info("motion_window updated to %.1f s", motion_window)
+        if strict_mode is not None:
+            self.strict_mode = strict_mode
+            logger.info("strict_mode updated to %s", strict_mode)
