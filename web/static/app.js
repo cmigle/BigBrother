@@ -13,9 +13,9 @@
 
     // Console branding
     console.log(
-        '%c⊕ BIGBROTHER %cv0.1 — Always Watching.',
-        'color: #ff4444; font-size: 16px; font-weight: bold;',
-        'color: #888; font-size: 12px;'
+        '%c BIGBROTHER %c — ALWAYS WATCHING ',
+        'background:#FF3D00; color:#0A0A0A; font-family:"Inter Tight",sans-serif; font-size:14px; font-weight:800; letter-spacing:3px; padding:6px 10px;',
+        'background:#0A0A0A; color:#737373; font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:2px; padding:6px 10px; border:1px solid #262626;'
     );
 
 })();
