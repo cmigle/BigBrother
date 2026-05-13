@@ -11,6 +11,13 @@
         <div class="settings-section">
             <h2 class="section-title">Camera</h2>
             <div class="setting-row">
+                <label for="camera-enabled">Camera On</label>
+                <label class="toggle">
+                    <input type="checkbox" id="camera-enabled" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
                 <label for="camera-select">Active Camera</label>
                 <select id="camera-select" style="background:var(--bg-input);border:1px solid var(--border);color:var(--fg);padding:6px 10px;font-family:var(--font);font-size:0.84rem;border-radius:var(--radius);flex:1;max-width:320px;outline:none;cursor:pointer;">
                     <option value="">Scanning…</option>
@@ -161,6 +168,9 @@ fetch('/api/cameras')
 fetch('/api/settings')
     .then(r => r.json())
     .then(data => {
+        if (typeof data.camera_enabled === 'boolean') {
+            document.getElementById('camera-enabled').checked = data.camera_enabled;
+        }
         if (data.detection) {
             confSlider.value = data.detection.confidence_threshold || 0.5;
             confVal.textContent = parseFloat(confSlider.value).toFixed(2);
@@ -199,6 +209,7 @@ document.getElementById('settings-form').addEventListener('submit', function(e) 
         escalation_enabled: document.getElementById('escalation').checked,
         filter_screens: document.getElementById('filter-screens').checked,
         camera_index: parseInt(camSelect.value) || 0,
+        camera_enabled: document.getElementById('camera-enabled').checked,
         pm_enabled:   document.getElementById('pm-enabled').checked,
         pm_check_web: document.getElementById('pm-web').checked,
         pm_check_apps: document.getElementById('pm-apps').checked,

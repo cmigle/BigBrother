@@ -130,6 +130,7 @@ def api_status():
         "distraction_label":    distraction_label,
         "distraction_source":   distraction_source,
         "distraction_duration": distraction_duration,
+        "camera_enabled":      bool(_detector.enabled) if _detector else False,
     })
 
 
@@ -242,7 +243,9 @@ def api_cameras():
 def api_settings():
     """Get or update settings."""
     if request.method == "GET":
-        return jsonify(_config)
+        payload = dict(_config)
+        payload["camera_enabled"] = bool(_detector.enabled) if _detector else True
+        return jsonify(payload)
 
     data = request.get_json()
     if not data:
@@ -264,6 +267,10 @@ def api_settings():
         if new_cam != _detector.camera_index:
             import threading as _t
             _t.Thread(target=_detector.switch_camera, args=(new_cam,), daemon=True).start()
+    if "camera_enabled" in data and _detector:
+        want = bool(data["camera_enabled"])
+        if want != bool(_detector.enabled):
+            threading.Thread(target=_detector.set_enabled, args=(want,), daemon=True).start()
     if "pm_enabled" in data and _process_monitor:
         _process_monitor.update_settings(enabled=bool(data["pm_enabled"]))
     if "pm_check_web" in data and _process_monitor:
@@ -282,11 +289,13 @@ def _generate_mjpeg():
     """Generator that yields MJPEG frames from the detector."""
     while True:
         frame = None
-        if _detector is not None:
+        if _detector is not None and _detector.enabled:
             frame = _detector.get_annotated_frame()
 
         if frame is None:
-            time.sleep(0.1)
+            # Sleep longer when the camera is intentionally off so we don't
+            # burn CPU polling a disabled detector across multiple viewers.
+            time.sleep(0.5 if (_detector is None or not _detector.enabled) else 0.1)
             continue
 
         ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])

@@ -120,6 +120,7 @@ class PhoneDetector:
         self._cap: Optional[cv2.VideoCapture] = None
         self._switch_lock = __import__('threading').Lock()
         self._pending_camera_index: Optional[int] = None
+        self.enabled: bool = True  # Master on/off — when False, camera is released and frames are not grabbed
 
         logger.info(
             "PhoneDetector initialized — model=%s  conf=%.2f  cam=%d  filter_screens=%s",
@@ -224,13 +225,41 @@ class PhoneDetector:
 
 
     def grab_frame(self) -> Optional[np.ndarray]:
-        """Read a single frame from the webcam. Returns None on failure."""
+        """Read a single frame from the webcam. Returns None on failure or when disabled."""
+        if not self.enabled:
+            return None
         if self._cap is None or not self._cap.isOpened():
             return None
         ret, frame = self._cap.read()
         if not ret:
             return None
         return frame
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """
+        Master on/off. When disabled, release the webcam handle so other
+        apps can use it. When re-enabled, reopen the camera.
+        Returns True if the state change succeeded.
+        """
+        with self._switch_lock:
+            if enabled == self.enabled:
+                return True
+            if enabled:
+                logger.info("Camera ENABLED — reopening index %d", self.camera_index)
+                self.enabled = True
+                # Reset detection state so a stale "phone visible" doesn't fire on resume
+                self._latest_result = None
+                self._latest_frame = None
+                self._phone_detected = False
+                self._actively_on_phone = False
+                return self.open_camera()
+            else:
+                logger.info("Camera DISABLED — releasing webcam")
+                self.enabled = False
+                self.release_camera()
+                self._latest_result = None
+                self._latest_frame = None
+                return True
 
     # ------------------------------------------------------------------
     # Detection
