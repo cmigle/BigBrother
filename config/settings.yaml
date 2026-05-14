@@ -11,7 +11,7 @@ detection:
   max_phone_area_fraction: 0.20   # Bboxes > 20% of frame area treated as tablets
   # Strict mode: fire on any visible phone, even when sitting on the desk.
   # Off = motion-gated (only held/moving phones trigger the scare).
-  strict_mode: false
+  strict_mode: true
 
 # Camera calibration — leave a value as null to keep the driver default.
 # Run `python main.py --list-cameras` to see available camera indices.
@@ -59,7 +59,10 @@ hardware:
 
 calendar:
   enabled: true
-  calendar_id: "primary"
+  # "all" → pull events from every calendar visible to the account (owned
+  # + writeable shared, skipping read-only system feeds like Holidays).
+  # Set to "primary" or a specific @group.calendar.google.com id to scope.
+  calendar_id: "all"
   refresh_interval: 300
 
 web:

@@ -33,9 +33,14 @@ class CalendarSync:
         self,
         credentials_path: str = "config/credentials.json",
         token_path: str = "config/token.json",
-        calendar_id: str = "primary",
+        calendar_id: str = "all",
         refresh_interval: int = 300,
     ):
+        """calendar_id:
+            "all"      — query every calendar visible to the account (default)
+            "primary"  — only the user's default calendar
+            "<id>"     — a specific calendar id (e.g. an @group.calendar.google.com id)
+        """
         self.credentials_path = Path(credentials_path)
         self.token_path = Path(token_path)
         self.calendar_id = calendar_id
@@ -46,6 +51,9 @@ class CalendarSync:
         self._events_cache: List[Dict[str, Any]] = []      # today
         self._tomorrow_cache: List[Dict[str, Any]] = []    # tomorrow
         self._tasks_cache: List[Dict[str, Any]] = []       # Google Tasks
+        # Cache the calendar-id list resolved from `calendar_id` setting so
+        # we don't re-list every refresh. Refreshed when _maybe_refresh runs.
+        self._calendar_ids: List[str] = []
         self._last_refresh: float = 0
         self._authenticated = False
         # googleapiclient's httplib2 transport is NOT thread-safe — concurrent
@@ -137,84 +145,139 @@ class CalendarSync:
         return self._authenticated
 
     # ------------------------------------------------------------------
+    # Calendar selection
+    # ------------------------------------------------------------------
+
+    def _resolve_calendar_ids(self) -> List[str]:
+        """Resolve the configured calendar_id setting into actual ids.
+
+        "all"     → every calendar visible to the account.
+        "primary" → just primary.
+        otherwise → treat the string as a literal calendar id.
+
+        Result is cached on the instance — most accounts only have a handful
+        of calendars and the list barely changes, so re-listing every poll
+        is wasteful. _maybe_refresh clears it when the cache rolls over."""
+        if self._calendar_ids:
+            return self._calendar_ids
+        if not self._authenticated or self._service is None:
+            return ["primary"]
+        target = (self.calendar_id or "all").strip()
+        if target != "all":
+            self._calendar_ids = [target]
+            return self._calendar_ids
+        try:
+            with self._api_lock:
+                result = self._service.calendarList().list().execute()
+            ids = []
+            for c in result.get("items", []):
+                cid = c.get("id")
+                if not cid:
+                    continue
+                # Skip purely informational read-only calendars (Holidays etc.).
+                # Heuristic: if the user is just a reader AND the id looks
+                # like a system feed, skip. We keep owned and shared-with-edit.
+                if c.get("accessRole") == "reader" and (
+                    cid.endswith("@group.v.calendar.google.com") or
+                    cid.startswith("en.")
+                ):
+                    continue
+                ids.append(cid)
+            if not ids:
+                ids = ["primary"]
+            self._calendar_ids = ids
+            logger.info("Calendar fetch will query %d calendars: %s",
+                        len(ids), ", ".join(ids[:3]) + ("…" if len(ids) > 3 else ""))
+            return ids
+        except Exception as exc:
+            logger.warning("calendarList().list() failed (%s) — falling back to primary", exc)
+            self._calendar_ids = ["primary"]
+            return self._calendar_ids
+
+    def _fetch_day(self, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+        """Pull events between start..end from every configured calendar and
+        merge into one timestamp-sorted list. Used by all the day-bound
+        fetch methods so they share a single multi-calendar pathway."""
+        merged: List[Dict[str, Any]] = []
+        for cid in self._resolve_calendar_ids():
+            try:
+                with self._api_lock:
+                    result = self._service.events().list(
+                        calendarId=cid,
+                        timeMin=start.isoformat(),
+                        timeMax=end.isoformat(),
+                        singleEvents=True,
+                        orderBy="startTime",
+                    ).execute()
+                for item in result.get("items", []):
+                    merged.append({
+                        "id": item.get("id"),
+                        "calendar_id": cid,
+                        "summary": item.get("summary", "Untitled"),
+                        "start": item.get("start", {}).get("dateTime",
+                                  item.get("start", {}).get("date", "")),
+                        "end":   item.get("end",   {}).get("dateTime",
+                                  item.get("end",   {}).get("date", "")),
+                        "status": item.get("status", "confirmed"),
+                        "description": item.get("description", ""),
+                    })
+            except Exception as exc:
+                logger.warning("Calendar %s fetch failed: %s", cid, exc)
+        # Sort by start so the merged view reads chronologically. Items
+        # with no start come last.
+        merged.sort(key=lambda e: e.get("start") or "9999")
+        return merged
+
+
+    # ------------------------------------------------------------------
     # Event fetching
     # ------------------------------------------------------------------
 
     def fetch_events(self, date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """
-        Fetch events for a given day (defaults to today).
-        Returns a list of event dicts with keys: id, summary, start, end, status.
+        Fetch events for a given day (defaults to today, in LOCAL time).
+
+        We deliberately bound the day by the user's local clock, not UTC.
+        Doing it in UTC means a 23:00 local meeting today shows up as
+        'tomorrow' and a 02:00 local meeting tomorrow shows up as 'today'
+        — the kind of off-by-one that makes the dashboard look wrong.
+        Google Calendar accepts a tz-aware ISO string and bounds the query
+        correctly regardless of timezone offset.
         """
         if not self._authenticated or self._service is None:
             logger.warning("Calendar not authenticated — returning empty events")
             return []
 
         if date is None:
-            date = datetime.now(timezone.utc)
+            date = datetime.now().astimezone()  # tz-aware in LOCAL tz
 
-        # Start / end of the day in UTC
         start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
 
         try:
-            with self._api_lock:
-                result = self._service.events().list(
-                    calendarId=self.calendar_id,
-                    timeMin=start_of_day.isoformat(),
-                    timeMax=end_of_day.isoformat(),
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
-
-            events = []
-            for item in result.get("items", []):
-                events.append({
-                    "id": item.get("id"),
-                    "summary": item.get("summary", "Untitled"),
-                    "start": item.get("start", {}).get("dateTime", item.get("start", {}).get("date", "")),
-                    "end": item.get("end", {}).get("dateTime", item.get("end", {}).get("date", "")),
-                    "status": item.get("status", "confirmed"),
-                    "description": item.get("description", ""),
-                })
-
+            events = self._fetch_day(start_of_day, end_of_day)
             self._events_cache = events
             self._last_refresh = time.time()
-            logger.info("Fetched %d calendar events", len(events))
+            logger.info("Fetched %d calendar events for today across %d calendar(s)",
+                        len(events), len(self._calendar_ids))
             return events
-
         except Exception as exc:
             logger.error("Failed to fetch calendar events: %s", exc)
             return self._events_cache  # return stale cache on error
 
     def fetch_tomorrow_events(self) -> List[Dict[str, Any]]:
-        """Fetch events for tomorrow directly into _tomorrow_cache."""
+        """Fetch tomorrow's events across every configured calendar."""
         if not self._authenticated or self._service is None:
             return []
-        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        tomorrow = datetime.now().astimezone() + timedelta(days=1)
         start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end   = start + timedelta(days=1)
         try:
-            with self._api_lock:
-                result = self._service.events().list(
-                    calendarId=self.calendar_id,
-                    timeMin=start.isoformat(),
-                    timeMax=end.isoformat(),
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
-            self._tomorrow_cache = [
-                {
-                    "id": e.get("id"),
-                    "summary": e.get("summary", "Untitled"),
-                    "start": e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
-                    "end":   e.get("end",   {}).get("dateTime", e.get("end",   {}).get("date", "")),
-                    "status": e.get("status", "confirmed"),
-                    "description": e.get("description", ""),
-                    "day": "tomorrow",
-                }
-                for e in result.get("items", [])
-            ]
-            logger.info("Fetched %d tomorrow events", len(self._tomorrow_cache))
+            events = self._fetch_day(start, end)
+            for e in events:
+                e["day"] = "tomorrow"
+            self._tomorrow_cache = events
+            logger.info("Fetched %d tomorrow events", len(events))
             return self._tomorrow_cache
         except Exception as exc:
             logger.error("Failed to fetch tomorrow events: %s", exc)
@@ -229,7 +292,8 @@ class CalendarSync:
         if not self._authenticated or self._tasks_service is None:
             return []
         try:
-            now = datetime.now(timezone.utc)
+            # Use LOCAL time so weekday/Sunday-end matches the user's clock.
+            now = datetime.now().astimezone()
 
             # Advance to the end of this Sunday; if <3 days remain, go to next Sunday
             days_until_sunday = (6 - now.weekday()) % 7  # Monday=0 … Sunday=6
@@ -284,6 +348,9 @@ class CalendarSync:
             # Re-check under the lock: another thread may have refreshed
             # while we were waiting.
             if time.time() - self._last_refresh > self.refresh_interval:
+                # Drop the cached calendar id list so a newly-added calendar
+                # gets discovered on the next cycle (~5 min by default).
+                self._calendar_ids = []
                 self.fetch_events()          # populates _events_cache (today)
                 self.fetch_tomorrow_events() # populates _tomorrow_cache
                 self.fetch_tasks()           # populates _tasks_cache
@@ -310,7 +377,9 @@ class CalendarSync:
         """
         self._maybe_refresh()
 
-        now = datetime.now(timezone.utc)
+        # Week-plan boundaries are LOCAL — see fetch_events for the rationale.
+        now = datetime.now().astimezone()
+        local_tz = now.tzinfo
         today = now.date()
 
         # How many days until Sunday (0 = today is Sunday → show current week only)
@@ -346,29 +415,20 @@ class CalendarSync:
                     for e in self._tomorrow_cache
                 ]
             else:
-                # Fetch on demand (will be cached by fetch_events → but we don't
-                # persist further-out days — do a live fetch for this week view)
+                # Fetch on demand across all calendars (week view doesn't
+                # cache further-out days — too many to keep warm).
                 day_events = []
                 if self._authenticated and self._service is not None:
                     try:
                         target_dt = datetime(target_date.year, target_date.month,
-                                             target_date.day, tzinfo=timezone.utc)
-                        start = target_dt
-                        end   = target_dt + timedelta(days=1)
-                        with self._api_lock:
-                            result = self._service.events().list(
-                                calendarId=self.calendar_id,
-                                timeMin=start.isoformat(),
-                                timeMax=end.isoformat(),
-                                singleEvents=True,
-                                orderBy="startTime",
-                            ).execute()
+                                             target_date.day, tzinfo=local_tz)
+                        events = self._fetch_day(target_dt, target_dt + timedelta(days=1))
                         day_events = [
                             {"summary": e.get("summary", ""),
-                             "start": e.get("start", {}).get("dateTime", e.get("start", {}).get("date", "")),
-                             "end":   e.get("end",   {}).get("dateTime", e.get("end",   {}).get("date", "")),
+                             "start": e.get("start", ""),
+                             "end":   e.get("end", ""),
                              "id":    e.get("id", "")}
-                            for e in result.get("items", [])
+                            for e in events
                         ]
                     except Exception as exc:
                         logger.warning("Could not fetch events for %s: %s", date_str, exc)
@@ -398,6 +458,29 @@ class CalendarSync:
 
         return days
 
+    @staticmethod
+    def _parse_event_dt(value: str) -> Optional[datetime]:
+        """Parse a Google Calendar start/end value.
+
+        Two shapes from the API:
+          - "2026-05-14T15:30:00+03:00"  (tz-aware)
+          - "2026-05-14"                  (all-day events, naive date string)
+
+        We return a tz-AWARE datetime in both cases: the all-day form is
+        anchored at local midnight. Mixing aware and naive datetimes in
+        comparisons raises TypeError, so we have to canonicalise here."""
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            # All-day event — Google returns just "YYYY-MM-DD". Treat it as
+            # local-day-start so it compares cleanly against an aware now().
+            dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return dt
+
     def get_current_event(self) -> Optional[Dict[str, Any]]:
         """Get the event happening right now, if any."""
         self._maybe_refresh()
@@ -405,11 +488,13 @@ class CalendarSync:
 
         for event in self._events_cache:
             try:
-                start = datetime.fromisoformat(event["start"].replace("Z", "+00:00"))
-                end = datetime.fromisoformat(event["end"].replace("Z", "+00:00"))
+                start = self._parse_event_dt(event.get("start", ""))
+                end   = self._parse_event_dt(event.get("end", ""))
+                if start is None or end is None:
+                    continue
                 if start <= now <= end:
                     return event
-            except (ValueError, KeyError):
+            except Exception:
                 continue
         return None
 
@@ -420,10 +505,10 @@ class CalendarSync:
 
         for event in self._events_cache + self._tomorrow_cache:
             try:
-                start = datetime.fromisoformat(event["start"].replace("Z", "+00:00"))
-                if start > now:
+                start = self._parse_event_dt(event.get("start", ""))
+                if start is not None and start > now:
                     return event
-            except (ValueError, KeyError):
+            except Exception:
                 continue
         return None
 
@@ -433,31 +518,43 @@ class CalendarSync:
 
     def complete_task(self, event_id: str) -> bool:
         """
-        Mark a calendar event as completed by changing its status.
-        Uses colorId to visually mark it as done (green = 11).
+        Mark a calendar event as completed by prefixing "[done]" to its title.
+        With multi-calendar support we have to know WHICH calendar the event
+        lives on — look it up from the cached payloads where we recorded it.
         """
         if not self._authenticated or self._service is None:
             return False
 
+        # Find the calendar this event came from. Cached entries record
+        # calendar_id; if the event is from get_week_plan (which doesn't
+        # cache far-out days) we won't find it and have to bail.
+        owning_cid: Optional[str] = None
+        for cached in self._events_cache + self._tomorrow_cache:
+            if cached.get("id") == event_id:
+                owning_cid = cached.get("calendar_id")
+                break
+        if not owning_cid:
+            # Last resort: try primary, but warn so it's discoverable in the log.
+            owning_cid = "primary"
+            logger.warning("complete_task(%s): no cached calendar id, falling back to primary", event_id)
+
         try:
             with self._api_lock:
                 event = self._service.events().get(
-                    calendarId=self.calendar_id, eventId=event_id
+                    calendarId=owning_cid, eventId=event_id
                 ).execute()
 
                 event["colorId"] = "11"  # Green in Google Calendar
-                # Prefix marker so we can recognise completed events on reload.
-                # Plain text instead of an emoji so the title reads cleanly in
-                # the native Google Calendar UI too.
                 summary = event.get("summary", "")
                 if not summary.startswith("[done]"):
                     event["summary"] = "[done] " + summary
 
                 self._service.events().update(
-                    calendarId=self.calendar_id, eventId=event_id, body=event
+                    calendarId=owning_cid, eventId=event_id, body=event
                 ).execute()
 
-            logger.info("Marked event %s as complete", event_id)
+            logger.info("Marked event %s on calendar %s as complete",
+                        event_id, owning_cid)
 
             # Refresh cache
             self.fetch_events()

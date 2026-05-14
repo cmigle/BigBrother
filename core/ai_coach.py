@@ -375,25 +375,33 @@ class AICoach:
 
     @staticmethod
     def _format_event_time(iso_str: str) -> str:
-        """Parse a Google Calendar start/end string and return a local 'h:mm AM'."""
+        """Parse a Google Calendar start/end string and return a local 'h:mm AM'.
+
+        All-day events come through as bare 'YYYY-MM-DD' with no time; for
+        those we return an empty string (no clock time to show)."""
         if not iso_str:
             return ""
+        # No 'T' separator means it's an all-day date, not a datetime.
+        if "T" not in iso_str:
+            return ""
         try:
-            # Handles both "...Z" and "...+00:00" forms
             dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-            # Convert to local time for display
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
             return dt.astimezone().strftime("%I:%M %p").lstrip("0")
         except Exception:
             return ""
 
     @staticmethod
     def _minutes_until(iso_str: str, now: datetime) -> Optional[int]:
-        """Whole minutes between now and an event start. None on parse failure."""
-        if not iso_str:
+        """Whole minutes between now and an event start. None on parse failure
+        or for all-day events (no specific start time)."""
+        if not iso_str or "T" not in iso_str:
             return None
         try:
             dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-            # Compare in the same tz space
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
             diff = (dt - now.astimezone(dt.tzinfo)).total_seconds() / 60
             return max(0, int(diff))
         except Exception:

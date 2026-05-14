@@ -425,6 +425,17 @@ liveToggle.addEventListener('change', () => {
     }).catch(err => console.error('Toggle save failed:', err));
 });
 
+// Chrome/Edge pause MJPEG streams on hidden tabs to save CPU; when the tab
+// becomes visible again the <img> shows the last buffered frame and never
+// reconnects. Force a fresh stream by re-setting src with a cache-buster.
+// We only do this when the toggle is ON — otherwise we'd reopen a stream
+// the user intentionally closed.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && liveToggle.checked) {
+        liveImg.src = '/api/camera/feed?t=' + Date.now();
+    }
+});
+
 // ── Init ─────────────────────────────────────────────────────────────
 setInterval(updateDashboard, 2000);
 updateDashboard();

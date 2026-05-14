@@ -339,13 +339,45 @@ def api_guess():
     return jsonify({"guess": _coach.generate_guess(), "has_current_event": has_event})
 
 
+_CAMERAS_CACHE: dict = {"at": 0.0, "data": None}
+_CAMERAS_CACHE_TTL = 30.0   # seconds
+
+
 @app.route("/api/cameras")
 def api_cameras():
-    """List all available camera indices detected on this machine."""
+    """List available camera indices.
+
+    Cached because probing on Windows means briefly opening each /dev/videoN —
+    and opening a camera the live detector is using steals the device. We
+    serve from a short-lived cache, and even when we DO probe we skip the
+    detector's active index so the live feed doesn't break."""
+    now = time.time()
+    if (_CAMERAS_CACHE["data"] is not None
+            and now - _CAMERAS_CACHE["at"] < _CAMERAS_CACHE_TTL):
+        return jsonify(_CAMERAS_CACHE["data"])
+
     from core.phone_detector import PhoneDetector
-    cameras = PhoneDetector.list_cameras()
     current = _detector.camera_index if _detector else 0
-    return jsonify({"cameras": cameras, "current": current})
+    # Tell list_cameras to skip the live detector's index and inject what we
+    # already know about it so the UI still sees a row for the active camera.
+    in_use = {}
+    if _detector and _detector._cap is not None and _detector._cap.isOpened():
+        try:
+            in_use[current] = {
+                "width":  int(_detector._cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                "height": int(_detector._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                "fps":    _detector._cap.get(cv2.CAP_PROP_FPS),
+            }
+        except Exception:
+            in_use[current] = {}
+    cameras = PhoneDetector.list_cameras(
+        skip_indices=[current] if _detector else None,
+        in_use=in_use,
+    )
+    payload = {"cameras": cameras, "current": current}
+    _CAMERAS_CACHE["data"] = payload
+    _CAMERAS_CACHE["at"]   = now
+    return jsonify(payload)
 
 
 @app.route("/api/settings", methods=["GET", "POST"])

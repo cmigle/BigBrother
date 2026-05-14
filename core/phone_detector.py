@@ -147,17 +147,37 @@ class PhoneDetector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def list_cameras(max_index: int = _CAMERA_SCAN_LIMIT) -> List[Dict]:
+    def list_cameras(
+        max_index: int = _CAMERA_SCAN_LIMIT,
+        skip_indices: Optional[List[int]] = None,
+        in_use: Optional[Dict[int, Dict]] = None,
+    ) -> List[Dict]:
         """
         Probe camera indices 0..max_index-1 and return a list of dicts
-        describing each available camera::
+        describing each available camera.
 
-            [{"index": 0, "width": 1280, "height": 720, "fps": 30.0}, ...]
+        On Windows, opening a camera that is currently in use by another
+        process (or by our own detector!) STEALS the device — the live
+        capture handle stops returning frames. The caller must pass
+        skip_indices for any indices already open so we don't probe them.
+        Pass in_use to inject those indices into the result as known.
+
+            list_cameras(skip_indices=[0], in_use={0: {"width": 640, ...}})
         """
         found: List[Dict] = []
+        skip = set(skip_indices or [])
+        in_use = in_use or {}
+
         import sys
         use_dshow = sys.platform == "win32"  # DirectShow skips MSMF EOS spam
         for idx in range(max_index):
+            if idx in skip:
+                # We can't probe it, but we know it's there — surface what
+                # the detector already knows (resolution / fps).
+                info = {"index": idx}
+                info.update(in_use.get(idx, {}))
+                found.append(info)
+                continue
             cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if use_dshow else cv2.CAP_ANY)
             if cap.isOpened():
                 ret, _ = cap.read()
