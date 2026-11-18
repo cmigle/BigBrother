@@ -167,3 +167,9 @@ BigBrother/
 ## Team
 
 Built by [Miglė Cirtautaitė](https://github.com/cmigle) and [Ignas Mikolaitis](https://github.com/ignuxas) at [Thunderclap Labs](https://thunderclaplabs.com), February–May 2026.
+
+## License
+
+Copyright © 2026 Miglė Cirtautaitė and Ignas Mikolaitis. Licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+BigBrother is built on [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics), which is also AGPL-3.0.
