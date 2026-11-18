@@ -9,7 +9,7 @@ a phone has been visible for a configurable duration.
 import time
 import logging
 import collections
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional, Tuple
 
 import cv2

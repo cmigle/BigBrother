@@ -23,12 +23,11 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side

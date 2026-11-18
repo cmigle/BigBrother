@@ -13,7 +13,7 @@ import logging
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 import requests
 import yaml

@@ -11,7 +11,7 @@ import time
 import random
 import logging
 import threading
-from typing import Optional, List
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,6 @@ class ScareSystem:
 
         # Rapid-fire sounds
         if self._alarm_sound and self._mixer_ready:
-            import pygame
             self._alarm_sound.set_volume(self.volume)
             self._alarm_sound.play(loops=-1)  # loop until stopped
 

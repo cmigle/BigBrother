@@ -8,13 +8,12 @@ by the frontend via AJAX polling.
 import time
 import logging
 import threading
-from io import BytesIO
 from typing import Optional
 
 import cv2
 import numpy as np
 from flask import (
-    Flask, render_template, jsonify, request, Response, send_from_directory,
+    Flask, render_template, jsonify, request, Response,
 )
 
 logger = logging.getLogger(__name__)

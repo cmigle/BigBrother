@@ -14,7 +14,6 @@ import signal
 import logging
 import threading
 import webbrowser
-from pathlib import Path
 
 import yaml
 

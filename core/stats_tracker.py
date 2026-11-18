@@ -11,8 +11,7 @@ import json
 import logging
 from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-from collections import defaultdict
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
