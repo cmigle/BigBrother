@@ -54,7 +54,7 @@ hardware:
   # name resolution handles .local without Bonjour. If that ever stops
   # working (different network, no mDNS responder), check the router DHCP
   # table for the device and replace with the raw IP (e.g. http://10.0.0.42).
-  wifi_enabled: true
+  wifi_enabled: false
   arduino_url: "http://servo.local"
 
 calendar:
