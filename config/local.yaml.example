@@ -18,3 +18,8 @@
 # ai_coach:
 #   ollama_model: "mistral"
 #   ollama_url: "http://localhost:11434"
+
+# Open the dashboard to other devices on your network. There is no login,
+# so anyone on the network can watch the camera feed.
+# web:
+#   host: "0.0.0.0"

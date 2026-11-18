@@ -76,7 +76,7 @@ DEFAULT_CONFIG = {
         "refresh_interval": 300,
     },
     "web": {
-        "host": "0.0.0.0",
+        "host": "127.0.0.1",
         "port": 5000,
     },
     "process_monitor": {

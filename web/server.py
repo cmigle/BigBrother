@@ -524,7 +524,7 @@ def camera_feed():
 # Server runner
 # ======================================================================
 
-def run_server(host: str = "0.0.0.0", port: int = 5000):
+def run_server(host: str = "127.0.0.1", port: int = 5000):
     """Run the Flask development server (called from main.py in a thread)."""
     logger.info("Starting web server on %s:%d", host, port)
     app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
