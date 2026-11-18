@@ -395,7 +395,16 @@ def api_settings():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    # Apply settings
+    try:
+        _apply_settings(data)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": f"Invalid setting value: {exc}"}), 400
+    return jsonify({"success": True})
+
+
+def _apply_settings(data: dict):
+    """Apply a settings update from the dashboard. Raises TypeError or
+    ValueError when a value can't be converted."""
     if "confidence_threshold" in data and _detector:
         _detector.update_settings(confidence=float(data["confidence_threshold"]))
     if "volume" in data and _scare:
@@ -423,8 +432,6 @@ def api_settings():
         _process_monitor.update_settings(check_web=bool(data["pm_check_web"]))
     if "pm_check_apps" in data and _process_monitor:
         _process_monitor.update_settings(check_apps=bool(data["pm_check_apps"]))
-
-    return jsonify({"success": True})
 
 
 # ======================================================================
