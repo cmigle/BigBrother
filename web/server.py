@@ -460,6 +460,8 @@ def _generate_mjpeg():
     """
     BOUNDARY = b"--frame\r\n"
     last_frame_id: int = -1
+    last_sent: float = 0.0
+    keepalive_seconds = 1.0
 
     while True:
         frame = None
@@ -496,10 +498,11 @@ def _generate_mjpeg():
         # warm. After the window we re-emit the same frame to keep the
         # connection alive (important when the camera is off and the
         # placeholder is the only thing to send).
-        if this_id == last_frame_id:
+        if this_id == last_frame_id and time.time() - last_sent < keepalive_seconds:
             time.sleep(0.066)
             continue
         last_frame_id = this_id
+        last_sent = time.time()
 
         header = (
             BOUNDARY
