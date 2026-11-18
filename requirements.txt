@@ -24,8 +24,11 @@ google-auth-httplib2>=0.1.1
 # Configuration
 PyYAML>=6.0
 
-# Optional: better TTS
-# edge-tts>=6.1.0
+# Active-window and process monitoring
+psutil>=5.9.0
+
+# Neural text-to-speech for the dashboard's voice playback
+edge-tts>=6.1.0
 
 # Optional: hardware serial
 # pyserial>=3.5
