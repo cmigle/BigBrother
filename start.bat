@@ -1,13 +1,16 @@
 @echo off
-title BigBrother — Starting...
+title BigBrother
 cd /d "%~dp0"
 
 echo.
 echo  Starting BigBrother...
-echo  Dashboard will open automatically in your browser.
-echo  Press Ctrl+C in this window to stop.
+echo  The dashboard opens in your browser. Press Ctrl+C here to stop.
 echo.
 
-c:\python312\python.exe main.py
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" main.py %*
+) else (
+    python main.py %*
+)
 
 pause
