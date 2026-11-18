@@ -1,6 +1,7 @@
 #include <ESP32Servo.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESPmDNS.h>
 
 // ── WiFi credentials ──────────────────────────────────────────────
 const char* ssid     = "xxx";
@@ -46,6 +47,12 @@ void setup() {
   Serial.print("Connected! IP address: ");
   Serial.println(WiFi.localIP());
   Serial.println("Enter this IP in the web settings panel.");
+
+  // Advertise as servo.local so the PC can find the trigger without a fixed IP
+  if (MDNS.begin("servo")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("Reachable as http://servo.local");
+  }
 
   // HTTP endpoint: GET /trigger
   server.on("/trigger", HTTP_GET, []() {
