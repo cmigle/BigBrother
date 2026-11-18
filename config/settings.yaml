@@ -48,7 +48,7 @@ ai_coach:
 hardware:
   serial_enabled: false
   serial_port: "COM3"
-  baud_rate: 9600
+  baud_rate: 115200
   # WiFi trigger — set wifi_enabled: true and point arduino_url at the ESP32.
   # The ESP32 publishes itself as servo.local via mDNS; on Windows 11 native
   # name resolution handles .local without Bonjour. If that ever stops

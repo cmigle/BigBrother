@@ -27,7 +27,7 @@ class SerialGun:
     def __init__(
         self,
         port: str = "COM3",
-        baud_rate: int = 9600,
+        baud_rate: int = 115200,
         enabled: bool = False,
         wifi_enabled: bool = False,
         arduino_url: str = "http://192.168.1.100",

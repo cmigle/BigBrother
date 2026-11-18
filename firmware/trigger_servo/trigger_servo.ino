@@ -68,9 +68,10 @@ void setup() {
 void loop() {
   server.handleClient();
 
-  // Also allow manual trigger via Serial monitor ('1' + Enter)
+  // USB serial trigger: "FIRE" from the PC app, or "1" + Enter from the Serial Monitor
   if (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '1') fireTrigger();
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd == "FIRE" || cmd == "1") fireTrigger();
   }
 }

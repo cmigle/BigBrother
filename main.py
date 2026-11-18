@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
     "hardware": {
         "serial_enabled": False,
         "serial_port": "COM3",
-        "baud_rate": 9600,
+        "baud_rate": 115200,
         "wifi_enabled": False,
         "arduino_url": "http://192.168.1.100",
     },
