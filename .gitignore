@@ -46,3 +46,6 @@ models/*.pt
 
 # Sound files (large binaries)
 # sounds/*.wav
+
+# YOLO weights (downloaded automatically on first run)
+/*.pt
