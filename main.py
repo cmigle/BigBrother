@@ -7,6 +7,7 @@ loop in a background thread, and starts the Flask web dashboard.
 """
 
 import argparse
+import copy
 import os
 import sys
 import time
@@ -97,7 +98,7 @@ def load_config(path: str = "config/settings.yaml") -> dict:
       2. config/settings.yaml  (tracked — shared defaults)
       3. config/local.yaml     (gitignored — personal overrides, never committed)
     """
-    config = DEFAULT_CONFIG.copy()
+    config = copy.deepcopy(DEFAULT_CONFIG)
 
     def _merge(base: dict, override: dict):
         for section, values in override.items():
